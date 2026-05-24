@@ -1,3 +1,15 @@
 *.cache
 *.exe
 *.pyc
+build/RedactedAudioToolbox/Analysis-00.toc
+build/RedactedAudioToolbox/base_library.zip
+build/RedactedAudioToolbox/EXE-00.toc
+build/RedactedAudioToolbox/PKG-00.toc
+build/RedactedAudioToolbox/PYZ-00.pyz
+build/RedactedAudioToolbox/PYZ-00.toc
+build/RedactedAudioToolbox/RedactedAudioToolbox.pkg
+build/RedactedAudioToolbox/warn-RedactedAudioToolbox.txt
+build/RedactedAudioToolbox/xref-RedactedAudioToolbox.html
+dist/config.json
+dist/EliteTMHelper2_Found.txt
+EliteTMHelper2.spec
