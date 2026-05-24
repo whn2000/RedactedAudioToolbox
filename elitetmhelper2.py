@@ -152,6 +152,9 @@ class FoundTorrent:
 
 def search_result_iterator(session, options, found, abort_flag):
     year = int(options.year_latest)
+    
+    seen_groups = set()
+
     while year > int(options.year_earliest) - 1:
         if abort_flag(): # 优化：检查是否需要中断
             print("\n[!] 搜索被用户手动终止。")
@@ -163,83 +166,69 @@ def search_result_iterator(session, options, found, abort_flag):
                 return # 优化：将 quit() 换成 return
             year = random.choice(list(range(int(options.year_earliest), int(options.year_latest+1))))
         
-        exceded_max_size = False
-        params = {
-            "action": "browse",
-            "encoding": "24bit Lossless",
-            "media": options.media,
-            "order_by": options.order_by,
-            "order_way": options.order_way,
-            "scene": 0,
-            "year": year,
-            "taglist": options.tags,
-            "tags_type": options.tags_type
-        }
+        search_queue = [""]
+        chars_added = False
         
-        if options.release_type != "":
-            params["releasetype"] = options.release_type
-
-        print(f"请求 {year} 年的第 1 页...")
-        try:
-            first_page = session.get_api(params).json()
-        except requests.exceptions.RequestException as e:
-            raise RedactedAPIError(f"网络请求失败: {str(e)}")
-        except json.decoder.JSONDecodeError:
-            raise RedactedAPIError("无效的登录凭证或 Cookie 过期")
-
-        if first_page["status"] != "success":
-            raise RedactedAPIError("API 返回状态不成功")
-            
-        if not first_page["response"]["results"]:
-            print(f"{year} 年没有找到结果")
-            if options.order_by != 'random':
-                year -= 1
-            continue
-        else:
-            number_of_pages = first_page["response"]["pages"]
-
-        print(f"找到 {number_of_pages} 页结果")
-
-        for group in first_page["response"]["results"]:
+        while search_queue:
             if abort_flag(): return
+            char = search_queue.pop(0)
             
-            rt = group.get("releaseType", 1)
-            if rt == 1 and not options.allow_album: continue
-            if rt == 5 and not options.allow_ep: continue
-            if rt == 9 and not options.allow_single: continue
+            exceded_max_size = False
+            params = {
+                "action": "browse",
+                "encoding": "24bit Lossless",
+                "media": options.media,
+                "order_by": options.order_by,
+                "order_way": options.order_way,
+                "scene": 0,
+                "year": year,
+                "taglist": options.tags,
+                "tags_type": options.tags_type
+            }
+            if char:
+                params["searchstr"] = char
             
-            if any(map(lambda x: x["size"] > options.max_size, group["torrents"])):
-                if options.order_by == "size" and options.order_way == "asc":
-                    exceded_max_size = True
-                    print("文件超出最大体积限制，跳过...")
-                    break
-            else:
-                yield group
-                
-        if exceded_max_size:
-            year -= 1
-            continue
+            if options.release_type != "":
+                params["releasetype"] = options.release_type
 
-        for i in range(2, number_of_pages+1):
-            if abort_flag(): return
-            params["page"] = i
-            print(f"请求 {year} 年的第 {i}/{number_of_pages} 页...")
+            search_label = f"(关键词 '{char}') " if char else ""
+            print(f"请求 {year} 年 {search_label}第 1 页...")
             try:
-                page = session.get_api(params).json()
-            except Exception as e:
-                print(f"获取第 {i} 页失败，跳过。原因: {str(e)}")
-                break
+                first_page = session.get_api(params).json()
+            except requests.exceptions.RequestException as e:
+                raise RedactedAPIError(f"网络请求失败: {str(e)}")
+            except json.decoder.JSONDecodeError:
+                raise RedactedAPIError("无效的登录凭证或 Cookie 过期")
 
-            if page.get("status") != "success":
-                print("API 返回异常，终止当前年份搜索。")
+            if first_page.get("status") != "success":
+                # API 返回状态不成功
                 break
+                
+            if not first_page["response"]["results"]:
+                print(f"{year} 年 {search_label}没有找到结果")
+                continue
+            else:
+                number_of_pages = first_page["response"]["pages"]
 
-            if not page["response"]["results"]:
-                print(f"达到 API 限制，转到下一年...")
-                break
+            print(f"找到 {number_of_pages} 页结果")
+            
+            if number_of_pages > 20:
+                print(f"⚠️ {year} 年 {search_label}结果数超过 20 页限制 (API 仅支持前 20 页)。")
+                if not char and not chars_added and options.order_by != "random":
+                    print(">>> 启动策略 4：自动按字母 a-z, 0-9 拆分搜索以获取全部数据...")
+                    chars_to_add = [chr(i) for i in range(ord('a'), ord('z')+1)] + [str(i) for i in range(10)]
+                    search_queue.extend(chars_to_add)
+                    chars_added = True
+                    
+            actual_pages = min(number_of_pages, 20)
 
-            for group in page["response"]["results"]:
+            for group in first_page["response"]["results"]:
                 if abort_flag(): return
+                
+                group_id = group["groupId"]
+                if group_id in seen_groups:
+                    continue
+                seen_groups.add(group_id)
                 
                 rt = group.get("releaseType", 1)
                 if rt == 1 and not options.allow_album: continue
@@ -253,9 +242,50 @@ def search_result_iterator(session, options, found, abort_flag):
                         break
                 else:
                     yield group
+                    
             if exceded_max_size:
-                year -= 1
-                break
+                continue
+
+            for i in range(2, actual_pages + 1):
+                if abort_flag(): return
+                params["page"] = i
+                print(f"请求 {year} 年 {search_label}第 {i}/{number_of_pages} 页...")
+                try:
+                    page = session.get_api(params).json()
+                except Exception as e:
+                    print(f"获取第 {i} 页失败，跳过。原因: {str(e)}")
+                    break
+
+                if page.get("status") != "success":
+                    print("API 返回异常，终止当前关键词搜索。")
+                    break
+
+                if not page["response"]["results"]:
+                    print(f"达到 API 限制，转到下一个关键词...")
+                    break
+
+                for group in page["response"]["results"]:
+                    if abort_flag(): return
+                    
+                    group_id = group["groupId"]
+                    if group_id in seen_groups:
+                        continue
+                    seen_groups.add(group_id)
+                    
+                    rt = group.get("releaseType", 1)
+                    if rt == 1 and not options.allow_album: continue
+                    if rt == 5 and not options.allow_ep: continue
+                    if rt == 9 and not options.allow_single: continue
+                    
+                    if any(map(lambda x: x["size"] > options.max_size, group["torrents"])):
+                        if options.order_by == "size" and options.order_way == "asc":
+                            exceded_max_size = True
+                            print("文件超出最大体积限制，跳过...")
+                            break
+                    else:
+                        yield group
+                if exceded_max_size:
+                    break
 
         if options.order_by != 'random':
             year -= 1
