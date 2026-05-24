@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 import random
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox, font as tkfont
+from tkinter import ttk, scrolledtext, messagebox, font as tkfont, filedialog
 import threading
 from types import SimpleNamespace
 
@@ -113,6 +113,7 @@ class FoundTorrent:
                 if torrent['trumpable']:
                     self.trump_status = True
                 self.seeders = torrent['seeders']
+                self.snatched = torrent.get('snatched', torrent.get('snatches', 0))
                 break
 
         for torrent in self.torrents:
@@ -166,12 +167,11 @@ def search_result_iterator(session, options, found, abort_flag):
                 return # 优化：将 quit() 换成 return
             year = random.choice(list(range(int(options.year_earliest), int(options.year_latest+1))))
         
-        search_queue = [""]
-        chars_added = False
+        search_queue = [{}]
         
         while search_queue:
             if abort_flag(): return
-            char = search_queue.pop(0)
+            extra_params = search_queue.pop(0)
             
             exceded_max_size = False
             params = {
@@ -185,13 +185,17 @@ def search_result_iterator(session, options, found, abort_flag):
                 "taglist": options.tags,
                 "tags_type": options.tags_type
             }
-            if char:
-                params["searchstr"] = char
-            
             if options.release_type != "":
                 params["releasetype"] = options.release_type
 
-            search_label = f"(关键词 '{char}') " if char else ""
+            params.update(extra_params)
+            
+            search_label_parts = []
+            if "releasetype" in extra_params: search_label_parts.append(f"RT:{extra_params['releasetype']}")
+            if "media" in extra_params: search_label_parts.append(f"Media:{extra_params['media']}")
+            if "order_way" in extra_params: search_label_parts.append(f"Order:{extra_params['order_way']}")
+            search_label = f"[{','.join(search_label_parts)}] " if search_label_parts else ""
+            
             print(f"请求 {year} 年 {search_label}第 1 页...")
             try:
                 first_page = session.get_api(params).json()
@@ -213,12 +217,34 @@ def search_result_iterator(session, options, found, abort_flag):
             print(f"找到 {number_of_pages} 页结果")
             
             if number_of_pages > 20:
-                print(f"⚠️ {year} 年 {search_label}结果数超过 20 页限制 (API 仅支持前 20 页)。")
-                if not char and not chars_added and options.order_by != "random":
-                    print(">>> 启动策略 4：自动按字母 a-z, 0-9 拆分搜索以获取全部数据...")
-                    chars_to_add = [chr(i) for i in range(ord('a'), ord('z')+1)] + [str(i) for i in range(10)]
-                    search_queue.extend(chars_to_add)
-                    chars_added = True
+                if "releasetype" not in extra_params and options.release_type == "":
+                    print(f"⚠️ {year} 年 {search_label}结果超过 20 页。正在按 发行类型(Release Type) 细分搜索...")
+                    release_types = [1, 3, 5, 6, 7, 9, 11, 13, 14, 15, 16, 21, 22, 23]
+                    for rt in release_types:
+                        new_params = extra_params.copy()
+                        new_params["releasetype"] = rt
+                        search_queue.append(new_params)
+                    continue
+                elif "media" not in extra_params and options.media == "":
+                    print(f"⚠️ {year} 年 {search_label}结果依然超过 20 页。正在按 介质(Media) 细分搜索...")
+                    medias = ['CD', 'WEB', 'Vinyl', 'SACD', 'Cassette', 'Blu-Ray', 'DVD', 'Soundboard']
+                    for m in medias:
+                        new_params = extra_params.copy()
+                        new_params["media"] = m
+                        search_queue.append(new_params)
+                    continue
+                elif "order_way" not in extra_params:
+                    print(f"⚠️ {year} 年 {search_label}细分后依然超过 20 页。将分别获取最新和最旧的 1000 个种子...")
+                    new_params_desc = extra_params.copy()
+                    new_params_desc["order_way"] = "desc"
+                    search_queue.append(new_params_desc)
+                    
+                    new_params_asc = extra_params.copy()
+                    new_params_asc["order_way"] = "asc"
+                    search_queue.append(new_params_asc)
+                    continue
+                else:
+                    print(f"⚠️ {year} 年 {search_label}已穷尽细分策略，只能获取部分数据 (前 20 页)。")
                     
             actual_pages = min(number_of_pages, 20)
 
@@ -338,7 +364,7 @@ def perform_search(options, abort_flag):
                 if options.lossy and this_torrent.lossy_status: nope.append(" lo")
                 if options.uns and this_torrent.uns(): nope.append(" un")
                 if options.min_seeders and this_torrent.seeders < options.min_seeders: nope.append(" sd")
-                if options.exclude_zero_snatches and torrent.get('snatched', 0) == 0: nope.append(" 0snatches")
+                if options.exclude_zero_snatches and this_torrent.snatched == 0: nope.append(" 0snatches")
 
                 if nope == [""]:
                     found += 1
@@ -366,8 +392,13 @@ def perform_search(options, abort_flag):
                                 if 'filename="' in cd:
                                     fname = cd.split('filename="')[1].split('"')[0]
                                 fname = "".join(c for c in fname if c not in r'\/:*?"<>|')
-                                Path(fname).write_bytes(dl_res.content)
-                                print(f" [已下载: {fname}]", end="")
+                                
+                                save_dir = Path(options.save_path) if hasattr(options, 'save_path') and options.save_path else Path(".")
+                                save_dir.mkdir(parents=True, exist_ok=True)
+                                save_path = save_dir / fname
+                                
+                                save_path.write_bytes(dl_res.content)
+                                print(f" [已下载: {save_path}]", end="")
                             else:
                                 print(f" [下载失败 {dl_res.status_code}]", end="")
                         except Exception:
@@ -419,6 +450,7 @@ class AppGUI:
         
         # 定义界面绑定的变量
         self.api_key_var = tk.StringVar()
+        self.save_path_var = tk.StringVar()
         self.media_var = tk.StringVar(value="CD")
         self.year_latest_var = tk.IntVar(value=2023)
         self.year_earliest_var = tk.IntVar(value=1970)
@@ -440,10 +472,34 @@ class AppGUI:
         
         self.request_interval_var = tk.DoubleVar(value=3.0)
 
+        self.config_file = "config.json"
+        self.load_config()
+
         # 构建界面元素
         self.build_ui()
 
+    def load_config(self):
+        try:
+            if Path(self.config_file).exists():
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    if 'api_key' in config:
+                        self.api_key_var.set(config['api_key'])
+                    if 'save_path' in config:
+                        self.save_path_var.set(config['save_path'])
+        except Exception as e:
+            print(f"Failed to load config: {e}")
 
+    def save_config(self):
+        try:
+            config = {
+                'api_key': self.api_key_var.get(),
+                'save_path': self.save_path_var.get()
+            }
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=4)
+        except Exception as e:
+            print(f"Failed to save config: {e}")
 
     def build_ui(self):
         # --- 1. 配置区 ---
@@ -473,6 +529,10 @@ class AppGUI:
 
         ttk.Label(config_frame, text="请求间隔(s) (Req Interval):").grid(row=4, column=0, sticky=tk.W, pady=2)
         ttk.Entry(config_frame, textvariable=self.request_interval_var, width=14).grid(row=4, column=1, sticky=tk.W, padx=5)
+
+        ttk.Label(config_frame, text="保存路径 (Save Path):").grid(row=5, column=0, sticky=tk.W, pady=2)
+        ttk.Entry(config_frame, textvariable=self.save_path_var, width=50).grid(row=5, column=1, columnspan=2, sticky=tk.W, padx=5)
+        ttk.Button(config_frame, text="浏览 (Browse)", command=self.browse_save_path).grid(row=5, column=3, sticky=tk.W, padx=5)
 
         # --- 2. 过滤选项区 ---
         filter_frame = ttk.LabelFrame(self.parent, text="高级过滤选项 (Advanced Filters)", padding=10)
@@ -511,6 +571,11 @@ class AppGUI:
 
         sys.stdout = RedirectText(self.log_text)
 
+    def browse_save_path(self):
+        directory = filedialog.askdirectory()
+        if directory:
+            self.save_path_var.set(directory)
+
     def get_options(self):
         return SimpleNamespace(
             api_key=self.api_key_var.get().strip(),
@@ -543,13 +608,16 @@ class AppGUI:
             tags_type=0,
             year_earliest=self.year_earliest_var.get(),
             year_latest=self.year_latest_var.get(),
-            request_interval=self.request_interval_var.get()
+            request_interval=self.request_interval_var.get(),
+            save_path=self.save_path_var.get()
         )
 
     def start_search(self):
         if not self.api_key_var.get().strip():
             messagebox.showwarning("提示", "执行前请先填入有效的 API Key！")
             return
+
+        self.save_config()
 
         self.is_running = True
         self.start_btn.config(state=tk.DISABLED)
