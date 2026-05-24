@@ -191,8 +191,11 @@ class RedirectText:
         self.output = text_ctrl
 
     def write(self, string):
-        self.output.insert(tk.END, string)
-        self.output.see(tk.END)
+        try:
+            self.output.insert(tk.END, string)
+            self.output.see(tk.END)
+        except Exception:
+            pass
 
     def flush(self):
         pass
@@ -232,8 +235,8 @@ class FlacDownsamplerGUI:
         self.start_btn = ctk.CTkButton(btn_frame, text=_("start_downsample"), command=self.start_process, fg_color="#28a745", hover_color="#218838")
         self.start_btn.pack(side=tk.LEFT, padx=5)
 
-        log_frame = ctk.CTkFrame(self.scrollable_frame)
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        log_frame = ctk.CTkFrame(self.parent)
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(5, 10))
         ctk.CTkLabel(log_frame, text=_("run_logs"), font=("", 16, "bold")).pack(anchor=tk.W, padx=5, pady=5)
         
         self.log_text = ctk.CTkTextbox(log_frame, wrap=tk.WORD)

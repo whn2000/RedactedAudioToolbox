@@ -19,6 +19,13 @@ class PipelineManager:
         self.monitor_thread = None
         self.tracked_torrents = {} # hash -> dict(group_info, torrent_info)
         self.processed_hashes = set()
+        self.cache_file = Path("pipeline_cache.json")
+        if self.cache_file.exists():
+            try:
+                with open(self.cache_file, "r", encoding='utf-8') as f:
+                    self.processed_hashes = set(json.load(f))
+            except Exception:
+                pass
 
     def start(self):
         if self.is_running: return
@@ -56,6 +63,11 @@ class PipelineManager:
                             continue
                             
                         self.processed_hashes.add(hash_str)
+                        try:
+                            with open(self.cache_file, "w", encoding='utf-8') as f:
+                                json.dump(list(self.processed_hashes), f)
+                        except Exception:
+                            pass
                         self.log(f"    [Pipeline] 📥 下载完成，准备处理: {name}")
                         
                         # 改变类别防止重复触发 (备用)
@@ -81,6 +93,13 @@ class PipelineManager:
             album_dir = Path(save_path) / name
             if not album_dir.exists() or not album_dir.is_dir():
                 self.log(f"    [Pipeline] ❌ 找不到下载的文件夹: {album_dir}")
+                return
+
+            output_dir = album_dir.parent / f"{album_dir.name} (16bit)"
+            official_torrent = album_dir.parent / f"{output_dir.name}_official.torrent"
+            
+            if official_torrent.exists():
+                self.log(f"    [Pipeline] ⏭️ 发现本地已存在官方种子 ({official_torrent.name})，说明此前已成功上传，跳过重复处理。")
                 return
 
             self.log(f"    [Pipeline] 💿 开始降频制种: {name}")
@@ -152,12 +171,19 @@ class PipelineManager:
             }
             
             # 携带 Remaster 信息以保持与原种子同一 Edition
-            if torrent_info.get('remastered'):
+            # 由于 search API 的 torrent_info 可能缺少 record label 等信息，我们需要从 group_info 里面找出对应的完整的 torrent 字典
+            full_torrent_info = torrent_info
+            for t in group_info['response']['torrents']:
+                if t['id'] == torrent_id:
+                    full_torrent_info = t
+                    break
+
+            if full_torrent_info.get('remastered'):
                 upload_data['remaster'] = 'true'
-                upload_data['remaster_year'] = str(torrent_info.get('remasterYear') or '')
-                upload_data['remaster_title'] = str(torrent_info.get('remasterTitle') or '')
-                upload_data['remaster_record_label'] = str(torrent_info.get('remasterRecordLabel') or '')
-                upload_data['remaster_catalogue_number'] = str(torrent_info.get('remasterCatalogueNumber') or '')
+                upload_data['remaster_year'] = str(full_torrent_info.get('remasterYear') or '')
+                upload_data['remaster_title'] = str(full_torrent_info.get('remasterTitle') or '')
+                upload_data['remaster_record_label'] = str(full_torrent_info.get('remasterRecordLabel') or '')
+                upload_data['remaster_catalogue_number'] = str(full_torrent_info.get('remasterCatalogueNumber') or '')
                 
             # 寻找生成的 torrent 文件
             generated_torrent = album_dir.parent / f"{output_dir.name}.torrent"

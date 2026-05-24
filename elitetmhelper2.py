@@ -494,8 +494,11 @@ class RedirectText:
         self.output = text_ctrl
 
     def write(self, string):
-        self.output.insert(tk.END, string)
-        self.output.see(tk.END)
+        try:
+            self.output.insert(tk.END, string)
+            self.output.see(tk.END)
+        except Exception:
+            pass
 
     def flush(self):
         pass
@@ -508,10 +511,10 @@ class AppGUI:
         self.api_key_var = tk.StringVar()
         self.save_path_var = tk.StringVar()
         self.media_var = tk.StringVar(value="CD")
-        self.year_latest_var = tk.IntVar(value=2023)
-        self.year_earliest_var = tk.IntVar(value=1970)
-        self.number_var = tk.IntVar(value=50)
-        self.max_size_var = tk.IntVar(value=2048)
+        self.year_latest_var = tk.StringVar(value="2023")
+        self.year_earliest_var = tk.StringVar(value="1970")
+        self.number_var = tk.StringVar(value="50")
+        self.max_size_var = tk.StringVar(value="2048")
         self.order_by_var = tk.StringVar(value="time")
         
         self.bandcamp_var = tk.BooleanVar(value=False)
@@ -524,10 +527,10 @@ class AppGUI:
         self.exclude_zero_snatches_var = tk.BooleanVar(value=False)
         self.auto_download_var = tk.BooleanVar(value=False)
         
-        self.buffer_limit_var = tk.DoubleVar(value=10.0)
+        self.buffer_limit_var = tk.StringVar(value="10.0")
         self.buffer_formula_var = tk.StringVar(value="(U / 0.65) - D")
         self.use_fl_token_var = tk.BooleanVar(value=False)
-        self.fl_token_threshold_var = tk.IntVar(value=500)
+        self.fl_token_threshold_var = tk.StringVar(value="500")
         
         self.qb_host_var = tk.StringVar(value="http://127.0.0.1")
         self.qb_port_var = tk.StringVar(value="8080")
@@ -535,7 +538,7 @@ class AppGUI:
         self.qb_pass_var = tk.StringVar(value="adminadmin")
         self.enable_pipeline_var = tk.BooleanVar(value=False)
 
-        self.request_interval_var = tk.DoubleVar(value=3.0)
+        self.request_interval_var = tk.StringVar(value="3.0")
 
         self.config_file = "config.json"
         self.load_config()
@@ -555,6 +558,28 @@ class AppGUI:
                     if 'qb_user' in config: self.qb_user_var.set(config['qb_user'])
                     if 'qb_pass' in config: self.qb_pass_var.set(config['qb_pass'])
                     if 'enable_pipeline' in config: self.enable_pipeline_var.set(config['enable_pipeline'])
+                    
+                    if 'media' in config: self.media_var.set(config['media'])
+                    if 'year_latest' in config: self.year_latest_var.set(config['year_latest'])
+                    if 'year_earliest' in config: self.year_earliest_var.set(config['year_earliest'])
+                    if 'number' in config: self.number_var.set(config['number'])
+                    if 'max_size' in config: self.max_size_var.set(config['max_size'])
+                    if 'order_by' in config: self.order_by_var.set(config['order_by'])
+                    
+                    if 'bandcamp' in config: self.bandcamp_var.set(config['bandcamp'])
+                    if 'ignore_lossy' in config: self.ignore_lossy_var.set(config['ignore_lossy'])
+                    if 'ignore_16bit' in config: self.ignore_16bit_var.set(config['ignore_16bit'])
+                    if 'ignore_trumpable' in config: self.ignore_trumpable_var.set(config['ignore_trumpable'])
+                    if 'album' in config: self.album_var.set(config['album'])
+                    if 'ep' in config: self.ep_var.set(config['ep'])
+                    if 'single' in config: self.single_var.set(config['single'])
+                    if 'exclude_zero_snatches' in config: self.exclude_zero_snatches_var.set(config['exclude_zero_snatches'])
+                    if 'auto_download' in config: self.auto_download_var.set(config['auto_download'])
+                    
+                    if 'buffer_limit' in config: self.buffer_limit_var.set(config['buffer_limit'])
+                    if 'use_fl_token' in config: self.use_fl_token_var.set(config['use_fl_token'])
+                    if 'fl_token_threshold' in config: self.fl_token_threshold_var.set(config['fl_token_threshold'])
+                    if 'request_interval' in config: self.request_interval_var.set(config['request_interval'])
         except Exception as e:
             print(f"Failed to load config: {e}")
 
@@ -568,7 +593,29 @@ class AppGUI:
                 'qb_port': self.qb_port_var.get(),
                 'qb_user': self.qb_user_var.get(),
                 'qb_pass': self.qb_pass_var.get(),
-                'enable_pipeline': self.enable_pipeline_var.get()
+                'enable_pipeline': self.enable_pipeline_var.get(),
+                
+                'media': self.media_var.get(),
+                'year_latest': self.year_latest_var.get(),
+                'year_earliest': self.year_earliest_var.get(),
+                'number': self.number_var.get(),
+                'max_size': self.max_size_var.get(),
+                'order_by': self.order_by_var.get(),
+                
+                'bandcamp': self.bandcamp_var.get(),
+                'ignore_lossy': self.ignore_lossy_var.get(),
+                'ignore_16bit': self.ignore_16bit_var.get(),
+                'ignore_trumpable': self.ignore_trumpable_var.get(),
+                'album': self.album_var.get(),
+                'ep': self.ep_var.get(),
+                'single': self.single_var.get(),
+                'exclude_zero_snatches': self.exclude_zero_snatches_var.get(),
+                'auto_download': self.auto_download_var.get(),
+                
+                'buffer_limit': self.buffer_limit_var.get(),
+                'use_fl_token': self.use_fl_token_var.get(),
+                'fl_token_threshold': self.fl_token_threshold_var.get(),
+                'request_interval': self.request_interval_var.get()
             }
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=4)
@@ -630,8 +677,10 @@ class AppGUI:
         ctk.CTkEntry(buf_frame, textvariable=self.buffer_formula_var, width=120).pack(side=tk.LEFT)
 
         ctk.CTkCheckBox(filter_frame, text=_("auto_use_fl_token"), variable=self.use_fl_token_var).grid(row=3, column=2, sticky=tk.W, padx=5)
-        ctk.CTkLabel(filter_frame, text=_("token_threshold_mb")).grid(row=3, column=3, sticky=tk.W, pady=5, padx=5)
-        ctk.CTkEntry(filter_frame, textvariable=self.fl_token_threshold_var, width=80).grid(row=3, column=3, sticky=tk.E, padx=5)
+        token_frame = ctk.CTkFrame(filter_frame, fg_color="transparent")
+        token_frame.grid(row=3, column=3, sticky=tk.W, padx=5)
+        ctk.CTkLabel(token_frame, text=_("token_threshold_mb")).pack(side=tk.LEFT, padx=(0,5))
+        ctk.CTkEntry(token_frame, textvariable=self.fl_token_threshold_var, width=80).pack(side=tk.LEFT)
 
         type_frame = ctk.CTkFrame(self.scrollable_frame)
         type_frame.pack(fill=tk.X, padx=5, pady=5)
@@ -667,8 +716,8 @@ class AppGUI:
         self.stop_btn = ctk.CTkButton(btn_frame, text=_("stop_search"), command=self.stop_search, fg_color="#dc3545", hover_color="#c82333", state=tk.DISABLED)
         self.stop_btn.pack(side=tk.LEFT, padx=5)
 
-        log_frame = ctk.CTkFrame(self.scrollable_frame)
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        log_frame = ctk.CTkFrame(self.parent)
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(5, 10))
         ctk.CTkLabel(log_frame, text=_("run_logs"), font=("", 16, "bold")).pack(anchor=tk.W, padx=5, pady=5)
         
         self.log_text = ctk.CTkTextbox(log_frame, wrap=tk.WORD)
@@ -681,6 +730,14 @@ class AppGUI:
         if directory:
             self.save_path_var.set(directory)
 
+    def _safe_int(self, var, default=0):
+        try: return int(var.get())
+        except ValueError: return default
+
+    def _safe_float(self, var, default=0.0):
+        try: return float(var.get())
+        except ValueError: return default
+
     def get_options(self):
         return SimpleNamespace(
             api_key=self.api_key_var.get().strip(),
@@ -692,7 +749,7 @@ class AppGUI:
             lossy=self.ignore_lossy_var.get(),
             trumpable=self.ignore_trumpable_var.get(),
             uns=False,
-            max_size=self.max_size_var.get() * 1048576,
+            max_size=self._safe_int(self.max_size_var, 2048) * 1048576,
             media=self.media_var.get() if self.media_var.get() else "",
             min_seeders=1,
             order_by=self.order_by_var.get(),
@@ -700,24 +757,24 @@ class AppGUI:
             output="EliteTMHelper2_Found.txt",
             output_args=False,
             html=False,
-            find_number=self.number_var.get(),
+            find_number=self._safe_int(self.number_var, 50),
             release_type="",
             exclude_zero_snatches=self.exclude_zero_snatches_var.get(),
             auto_download=self.auto_download_var.get(),
             allow_album=self.album_var.get(),
             allow_ep=self.ep_var.get(),
             allow_single=self.single_var.get(),
-            buffer_limit=self.buffer_limit_var.get(),
+            buffer_limit=self._safe_float(self.buffer_limit_var, 10.0),
             buffer_formula=self.buffer_formula_var.get(),
             use_fl_token=self.use_fl_token_var.get(),
-            fl_token_threshold=self.fl_token_threshold_var.get(),
+            fl_token_threshold=self._safe_int(self.fl_token_threshold_var, 500),
             show_api_times=False,
             show_size=True,
             tags=None,
             tags_type=0,
-            year_earliest=self.year_earliest_var.get(),
-            year_latest=self.year_latest_var.get(),
-            request_interval=self.request_interval_var.get(),
+            year_earliest=self._safe_int(self.year_earliest_var, 1970),
+            year_latest=self._safe_int(self.year_latest_var, 2023),
+            request_interval=self._safe_float(self.request_interval_var, 3.0),
             save_path=self.save_path_var.get(),
             qb_host=self.qb_host_var.get(),
             qb_port=self.qb_port_var.get(),

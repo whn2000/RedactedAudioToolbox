@@ -99,12 +99,10 @@ if __name__ == "__main__":
         pass
         
     root = ctk.CTk()
-    root.withdraw() 
     
     if not check_and_install_dependencies(root):
         messagebox.showerror("错误/Error", "缺少必要的环境依赖 (ffmpeg, sox) / Missing dependencies (ffmpeg, sox).")
         sys.exit(1)
         
-    root.deiconify()
     app = MainApp(root)
     root.mainloop()
