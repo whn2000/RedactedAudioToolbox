@@ -8,13 +8,18 @@ import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, scrolledtext
 
+if os.name == 'nt':
+    SUBPROCESS_KWARGS = {'creationflags': 0x08000000}
+else:
+    SUBPROCESS_KWARGS = {}
+
 # 增加 Pillow 处理最大像素限制，防止拼接超长图时报错
 Image.MAX_IMAGE_PIXELS = None
 
 def check_sox_installed():
     """检查系统是否安装了 sox"""
     try:
-        subprocess.run(["sox", "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        subprocess.run(["sox", "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, **SUBPROCESS_KWARGS)
         return True
     except FileNotFoundError:
         return False
@@ -22,7 +27,7 @@ def check_sox_installed():
 def get_audio_nyquist(file_path):
     """通过 soxi 获取音频的采样率并计算尼奎斯特频率"""
     try:
-        result = subprocess.run(["soxi", "-r", str(file_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        result = subprocess.run(["soxi", "-r", str(file_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **SUBPROCESS_KWARGS)
         samplerate = int(result.stdout.strip())
         return samplerate / 2
     except Exception:
@@ -31,9 +36,9 @@ def get_audio_nyquist(file_path):
 def get_audio_specs(file_path):
     """通过 soxi 获取音频的位深和采样率"""
     try:
-        res_sr = subprocess.run(["soxi", "-r", str(file_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        res_sr = subprocess.run(["soxi", "-r", str(file_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **SUBPROCESS_KWARGS)
         sample_rate = int(res_sr.stdout.strip())
-        res_b = subprocess.run(["soxi", "-b", str(file_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        res_b = subprocess.run(["soxi", "-b", str(file_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **SUBPROCESS_KWARGS)
         bit_depth = int(res_b.stdout.strip())
         return bit_depth, sample_rate
     except Exception:
@@ -89,7 +94,7 @@ def judge_lossless(cutoff_freq, bit_depth, sample_rate):
     else:
         return f"🚨 极差音质 ({specs})", "高频严重缺失。"
 
-def analyze_single_file(file_path, idx, total, output_dir):
+def analyze_single_file(file_path, idx, total, output_dir, fast_mode=False):
     """处理单个文件的并发任务"""
     filename = file_path.name
     base_name = file_path.stem
@@ -106,9 +111,11 @@ def analyze_single_file(file_path, idx, total, output_dir):
     try:
         # 并发执行这两条命令也可以，但为了简单，这里直接顺序执行
         subprocess.run(["sox", str(file_path), "-n", "spectrogram", "-r", "-Y", "512", "-o", str(raw_img)], 
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        subprocess.run(["sox", str(file_path), "-n", "spectrogram", "-t", base_name, "-o", str(temp_view_img)], 
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, **SUBPROCESS_KWARGS)
+        
+        if not fast_mode:
+            subprocess.run(["sox", str(file_path), "-n", "spectrogram", "-t", base_name, "-o", str(temp_view_img)], 
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, **SUBPROCESS_KWARGS)
 
         if raw_img.exists():
             cutoff = analyze_spectrogram(raw_img, nyquist)
@@ -129,7 +136,7 @@ def analyze_single_file(file_path, idx, total, output_dir):
     return result_dict
 
 
-def process_album(album_dir, output_dir=None):
+def process_album(album_dir, output_dir=None, fast_mode=False):
     if not check_sox_installed():
         print("错误: 系统未检测到 'sox' 命令。")
         return
@@ -145,8 +152,8 @@ def process_album(album_dir, output_dir=None):
     # 优雅的文件扫描
     audio_files = []
     for ext in ('.flac', '.wav', '.ape', '.alac', '.m4a'):
-        # rglog 是大小写敏感的（Linux上），为保险我们用 iterdir 配合 lower() 检查
-        audio_files.extend([f for f in album_path.iterdir() if f.is_file() and f.suffix.lower() == ext])
+        # rglob('*') 配合 lower() 检查，可以递归搜索所有子文件夹并且忽略大小写
+        audio_files.extend([f for f in album_path.rglob('*') if f.is_file() and f.suffix.lower() == ext])
 
     if not audio_files:
         print("未在指定目录中找到无损音频文件。")
@@ -164,7 +171,7 @@ def process_album(album_dir, output_dir=None):
 
     # 引入并发加速
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = {executor.submit(analyze_single_file, f, idx+1, total_files, output_dir): f for idx, f in enumerate(audio_files)}
+        futures = {executor.submit(analyze_single_file, f, idx+1, total_files, output_dir, fast_mode): f for idx, f in enumerate(audio_files)}
         for future in concurrent.futures.as_completed(futures):
             res = future.result()
             results.append(res)
@@ -209,10 +216,17 @@ def process_album(album_dir, output_dir=None):
 
     # 输出报告
     print("\n" + "="*35 + " 专辑无损检测报告 " + "="*35)
+    
+    # 汇总结论，如果都是真无损则返回 True
+    all_lossless = True
     for r in results:
         cutoff_str = f"{r['cutoff']:.1f} Hz" if r['cutoff'] is not None else "N/A"
         print(f"{r['file'][:38]:<40} | {cutoff_str:<10} | {r['verdict']}")
+        if "假" in r['verdict'] or "差" in r['verdict'] or "失败" in r['verdict']:
+            all_lossless = False
+            
     print("=" * 88)
+    return all_lossless
 
 
 class RedirectText:
@@ -231,6 +245,7 @@ class LosslessCheckerGUI:
         self.parent = parent
         
         self.input_dir_var = tk.StringVar()
+        self.fast_mode_var = tk.BooleanVar(value=False)
 
         self.build_ui()
 
@@ -241,6 +256,8 @@ class LosslessCheckerGUI:
         ttk.Label(config_frame, text="待检测专辑文件夹 (Album Dir):").grid(row=0, column=0, sticky=tk.W, pady=2)
         ttk.Entry(config_frame, textvariable=self.input_dir_var, width=50).grid(row=0, column=1, sticky=tk.W, padx=5)
         ttk.Button(config_frame, text="浏览... (Browse...)", command=self.browse_dir).grid(row=0, column=2, padx=5)
+
+        ttk.Checkbutton(config_frame, text="快速模式 (仅检查不生成可视图形)", variable=self.fast_mode_var).grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=5)
 
         btn_frame = ttk.Frame(self.parent)
         btn_frame.pack(fill=tk.X, padx=10, pady=5)
@@ -273,8 +290,9 @@ class LosslessCheckerGUI:
         old_stdout = sys.stdout
         sys.stdout = RedirectText(self.log_text)
         try:
-            print(">>> 正在启动真假无损/Hi-Res 检测...\n")
-            process_album(self.input_dir_var.get())
+            mode_str = " (快速模式)" if self.fast_mode_var.get() else ""
+            print(f">>> 正在启动真假无损/Hi-Res 检测{mode_str}...\n")
+            process_album(self.input_dir_var.get(), fast_mode=self.fast_mode_var.get())
         except Exception as e:
             print(f"\n❌ [错误]: {str(e)}")
         finally:

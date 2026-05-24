@@ -333,6 +333,30 @@ def perform_search(options, abort_flag):
         'Authorization': f'{options.api_key}'}
     session.headers.update(headers)
 
+    # 获取用户状态以计算 Buffer
+    current_buffer_gb = float('inf')
+    try:
+        index_data = session.get_api({"action": "index"}).json()
+        if index_data.get("status") == "success":
+            user_stats = index_data["response"]["userstats"]
+            uploaded = user_stats.get("uploaded", 0)
+            downloaded = user_stats.get("downloaded", 0)
+            req_ratio = user_stats.get("requiredRatio", 0)
+            
+            formula = options.buffer_formula.strip()
+            safe_dict = {'U': uploaded, 'D': downloaded, 'R': req_ratio}
+            try:
+                # 仅限基本数学运算
+                current_buffer = eval(formula, {"__builtins__": None}, safe_dict)
+            except Exception as e:
+                print(f"⚠️ Buffer 公式 '{formula}' 解析失败 ({e})，降级使用默认公式: (U / 0.65) - D")
+                current_buffer = (uploaded / 0.65) - downloaded
+                
+            current_buffer_gb = current_buffer / (1024**3)
+            print(f">>> 当前账号 Buffer 约为: {current_buffer_gb:.2f} GB (保护线: {options.buffer_limit} GB)")
+    except Exception as e:
+        print(f"获取用户账号信息失败，将跳过 Buffer 检查: {e}")
+
     cache = Cache(options) if options.cache != 'Disabled' else False
     search_results = search_result_iterator(session, options, found, abort_flag)
 
@@ -384,8 +408,23 @@ def perform_search(options, abort_flag):
                     if options.show_size: print(f" {round(torrent['size']/1048576, 2)}MB", end="")
                     
                     if options.auto_download:
+                        size_mb = torrent['size'] / 1048576
+                        
+                        # 检查 Buffer 是否够用
+                        if not options.use_fl_token or size_mb < options.fl_token_threshold:
+                            if current_buffer_gb - (size_mb / 1024) < options.buffer_limit:
+                                print(f" ⚠️ Buffer 将低于安全线 ({options.buffer_limit} GB)，停止下载当前及后续种子！")
+                                return
+                            current_buffer_gb -= (size_mb / 1024) # 扣除预计下载量
+
                         try:
-                            dl_res = session.get(f"https://redacted.sh/ajax.php?action=download&id={torrent['torrentId']}")
+                            dl_url = f"https://redacted.sh/ajax.php?action=download&id={torrent['torrentId']}"
+                            used_token = False
+                            if options.use_fl_token and size_mb >= options.fl_token_threshold:
+                                dl_url += "&usetoken=1"
+                                used_token = True
+                                
+                            dl_res = session.get(dl_url)
                             if dl_res.status_code == 200:
                                 fname = f"{torrent['torrentId']}.torrent"
                                 cd = dl_res.headers.get("content-disposition", "")
@@ -398,11 +437,26 @@ def perform_search(options, abort_flag):
                                 save_path = save_dir / fname
                                 
                                 save_path.write_bytes(dl_res.content)
-                                print(f" [已下载: {save_path}]", end="")
+                                token_str = " (使用了 Token)" if used_token else ""
+                                print(f" [已下载{token_str}: {save_path}]", end="")
+                                
+                                # 将 metadata 保存为 json 供 PipelineManager 读取
+                                meta_path = save_path.with_suffix('.json')
+                                with open(meta_path, 'w', encoding='utf-8') as f:
+                                    json.dump({
+                                        'group_info': group_info,
+                                        'torrent_info': torrent,
+                                        'tracker_url': 'https://flacsfor.me/announce'
+                                    }, f)
+                                
+                                # 推送到 qBittorrent
+                                if hasattr(options, 'pipeline') and options.pipeline:
+                                    options.pipeline.add_to_pipeline(str(save_path), group_info, torrent, str(save_path.parent))
+                                    
                             else:
                                 print(f" [下载失败 {dl_res.status_code}]", end="")
-                        except Exception:
-                            print(" [下载异常]", end="")
+                        except Exception as e:
+                            print(f" [下载异常: {e}]", end="")
                     
                     print("")
                     
@@ -470,6 +524,17 @@ class AppGUI:
         self.exclude_zero_snatches_var = tk.BooleanVar(value=False)
         self.auto_download_var = tk.BooleanVar(value=False)
         
+        self.buffer_limit_var = tk.DoubleVar(value=10.0) # GB
+        self.buffer_formula_var = tk.StringVar(value="(U / 0.65) - D")
+        self.use_fl_token_var = tk.BooleanVar(value=False)
+        self.fl_token_threshold_var = tk.IntVar(value=500) # MB
+        
+        self.qb_host_var = tk.StringVar(value="http://127.0.0.1")
+        self.qb_port_var = tk.StringVar(value="8080")
+        self.qb_user_var = tk.StringVar(value="admin")
+        self.qb_pass_var = tk.StringVar(value="adminadmin")
+        self.enable_pipeline_var = tk.BooleanVar(value=False)
+
         self.request_interval_var = tk.DoubleVar(value=3.0)
 
         self.config_file = "config.json"
@@ -487,6 +552,13 @@ class AppGUI:
                         self.api_key_var.set(config['api_key'])
                     if 'save_path' in config:
                         self.save_path_var.set(config['save_path'])
+                    if 'buffer_formula' in config:
+                        self.buffer_formula_var.set(config['buffer_formula'])
+                    if 'qb_host' in config: self.qb_host_var.set(config['qb_host'])
+                    if 'qb_port' in config: self.qb_port_var.set(config['qb_port'])
+                    if 'qb_user' in config: self.qb_user_var.set(config['qb_user'])
+                    if 'qb_pass' in config: self.qb_pass_var.set(config['qb_pass'])
+                    if 'enable_pipeline' in config: self.enable_pipeline_var.set(config['enable_pipeline'])
         except Exception as e:
             print(f"Failed to load config: {e}")
 
@@ -494,7 +566,13 @@ class AppGUI:
         try:
             config = {
                 'api_key': self.api_key_var.get(),
-                'save_path': self.save_path_var.get()
+                'save_path': self.save_path_var.get(),
+                'buffer_formula': self.buffer_formula_var.get(),
+                'qb_host': self.qb_host_var.get(),
+                'qb_port': self.qb_port_var.get(),
+                'qb_user': self.qb_user_var.get(),
+                'qb_pass': self.qb_pass_var.get(),
+                'enable_pipeline': self.enable_pipeline_var.get()
             }
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=4)
@@ -545,12 +623,41 @@ class AppGUI:
         ttk.Checkbutton(filter_frame, text="排除 0 完成数(Snatched) (Excl 0 Snatches)", variable=self.exclude_zero_snatches_var).grid(row=1, column=0, sticky=tk.W, padx=5)
         ttk.Checkbutton(filter_frame, text="自动下载种子 (Auto DL Torrent)", variable=self.auto_download_var).grid(row=1, column=1, sticky=tk.W, padx=5)
 
+        ttk.Label(filter_frame, text="保护 Buffer(GB):").grid(row=2, column=0, sticky=tk.W, pady=2)
+        buf_frame = ttk.Frame(filter_frame)
+        buf_frame.grid(row=2, column=0, sticky=tk.E, padx=5)
+        ttk.Entry(buf_frame, textvariable=self.buffer_limit_var, width=6).pack(side=tk.LEFT)
+        ttk.Label(buf_frame, text="公式:").pack(side=tk.LEFT, padx=(5,0))
+        ttk.Entry(buf_frame, textvariable=self.buffer_formula_var, width=12).pack(side=tk.LEFT)
+
+        ttk.Checkbutton(filter_frame, text="自动使用 FL Token", variable=self.use_fl_token_var).grid(row=2, column=1, sticky=tk.W, padx=5)
+        ttk.Label(filter_frame, text="Token 大小阈值(MB):").grid(row=2, column=2, sticky=tk.W, pady=2)
+        ttk.Entry(filter_frame, textvariable=self.fl_token_threshold_var, width=10).grid(row=2, column=2, sticky=tk.E, padx=5)
+
         # 新增发行类型区
         type_frame = ttk.LabelFrame(self.parent, text="发行类型筛选 (Release Type)", padding=10)
         type_frame.pack(fill=tk.X, padx=10, pady=5)
         ttk.Checkbutton(type_frame, text="Album (专辑)", variable=self.album_var).grid(row=0, column=0, sticky=tk.W, padx=15)
         ttk.Checkbutton(type_frame, text="EP", variable=self.ep_var).grid(row=0, column=1, sticky=tk.W, padx=15)
         ttk.Checkbutton(type_frame, text="Single (单曲)", variable=self.single_var).grid(row=0, column=2, sticky=tk.W, padx=15)
+
+        # --- 2.5 自动化工作流与 qBittorrent ---
+        pipeline_frame = ttk.LabelFrame(self.parent, text="自动化工作流 (Auto Pipeline & qBittorrent)", padding=10)
+        pipeline_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        ttk.Checkbutton(pipeline_frame, text="启用完整流水线 (下载->降频->检查->尝试上传)", variable=self.enable_pipeline_var).grid(row=0, column=0, columnspan=4, sticky=tk.W, pady=5)
+        
+        ttk.Label(pipeline_frame, text="qB Host:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        ttk.Entry(pipeline_frame, textvariable=self.qb_host_var, width=20).grid(row=1, column=1, sticky=tk.W, padx=5)
+        
+        ttk.Label(pipeline_frame, text="qB Port:").grid(row=1, column=2, sticky=tk.W, pady=2)
+        ttk.Entry(pipeline_frame, textvariable=self.qb_port_var, width=10).grid(row=1, column=3, sticky=tk.W, padx=5)
+        
+        ttk.Label(pipeline_frame, text="qB User:").grid(row=2, column=0, sticky=tk.W, pady=2)
+        ttk.Entry(pipeline_frame, textvariable=self.qb_user_var, width=20).grid(row=2, column=1, sticky=tk.W, padx=5)
+        
+        ttk.Label(pipeline_frame, text="qB Pass:").grid(row=2, column=2, sticky=tk.W, pady=2)
+        ttk.Entry(pipeline_frame, textvariable=self.qb_pass_var, width=20, show="*").grid(row=2, column=3, sticky=tk.W, padx=5)
 
         # --- 3. 按钮区 ---
         btn_frame = ttk.Frame(self.parent)
@@ -602,6 +709,10 @@ class AppGUI:
             allow_album=self.album_var.get(),
             allow_ep=self.ep_var.get(),
             allow_single=self.single_var.get(),
+            buffer_limit=self.buffer_limit_var.get(),
+            buffer_formula=self.buffer_formula_var.get(),
+            use_fl_token=self.use_fl_token_var.get(),
+            fl_token_threshold=self.fl_token_threshold_var.get(),
             show_api_times=False,
             show_size=True,
             tags=None,
@@ -609,7 +720,12 @@ class AppGUI:
             year_earliest=self.year_earliest_var.get(),
             year_latest=self.year_latest_var.get(),
             request_interval=self.request_interval_var.get(),
-            save_path=self.save_path_var.get()
+            save_path=self.save_path_var.get(),
+            qb_host=self.qb_host_var.get(),
+            qb_port=self.qb_port_var.get(),
+            qb_user=self.qb_user_var.get(),
+            qb_pass=self.qb_pass_var.get(),
+            enable_pipeline=self.enable_pipeline_var.get()
         )
 
     def start_search(self):
@@ -635,7 +751,26 @@ class AppGUI:
     def run_thread(self):
         try:
             options = self.get_options()
+            
+            # 初始化 PipelineManager
+            pipeline = None
+            if options.enable_pipeline:
+                try:
+                    from pipeline_manager import PipelineManager
+                    pipeline = PipelineManager(
+                        options.qb_host, options.qb_port, options.qb_user, options.qb_pass,
+                        None, options, log_callback=print
+                    )
+                    pipeline.start()
+                    # 挂载到 options 上供 perform_search 使用
+                    options.pipeline = pipeline
+                except Exception as e:
+                    print(f"初始化流水线失败: {e}")
+            
             perform_search(options, abort_flag=lambda: not self.is_running)
+            
+            if pipeline:
+                print(">>> 搜索完成，流水线监控将继续在后台运行，直至您关闭程序。")
         except RedactedAPIError as e:
             print(f"\n❌ [API 错误]: {str(e)}")
         except Exception as e:

@@ -7,6 +7,11 @@ import shutil
 import json
 import concurrent.futures
 
+if os.name == 'nt':
+    SUBPROCESS_KWARGS = {'creationflags': 0x08000000}
+else:
+    SUBPROCESS_KWARGS = {}
+
 try:
     from torf import Torrent
 except ImportError:
@@ -22,7 +27,7 @@ def check_dependencies():
     missing = []
     for cmd in ['ffmpeg', 'ffprobe']:
         try:
-            subprocess.run([cmd, '-version'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run([cmd, '-version'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **SUBPROCESS_KWARGS)
         except FileNotFoundError:
             missing.append(cmd)
     if missing:
@@ -37,7 +42,7 @@ def get_audio_info(filepath):
         str(filepath)
     ]
     try:
-        output = subprocess.run(cmd_bits, capture_output=True, text=True, check=True)
+        output = subprocess.run(cmd_bits, capture_output=True, text=True, check=True, **SUBPROCESS_KWARGS)
         data = json.loads(output.stdout)
         
         # 从 streams 中提取
@@ -67,7 +72,7 @@ def convert_to_16bit(input_path, output_path):
         '-compression_level', '8',        # FLAC 最高压缩率
         str(output_path), '-y'
     ]
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **SUBPROCESS_KWARGS)
     return input_path.name
 
 
@@ -81,7 +86,7 @@ def create_pt_torrent(source_dir, torrent_path, tracker_url, source_flag):
     
     # torf 会自动分块和计算哈希
     t.generate()
-    t.write(str(torrent_path))
+    t.write(str(torrent_path), overwrite=True)
     print(f"  ✅ 种子已生成: {torrent_path.name}")
 
 

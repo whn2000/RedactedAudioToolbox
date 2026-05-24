@@ -13,3 +13,4 @@ build/RedactedAudioToolbox/xref-RedactedAudioToolbox.html
 dist/config.json
 dist/EliteTMHelper2_Found.txt
 EliteTMHelper2.spec
+*.json
