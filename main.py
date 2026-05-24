@@ -10,7 +10,7 @@ from lossless_checker import LosslessCheckerGUI
 class MainApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Redacted Audio Toolbox - 三合一音乐工具箱")
+        self.root.title("Redacted Audio Toolbox - 三合一音乐工具箱 (3-in-1 Audio Toolbox)")
         
         self.build_menu()
         
@@ -25,17 +25,17 @@ class MainApp:
         
         # Tab 1: Redacted Finder
         self.tab1 = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab1, text=" 🔍 Redacted 种子搜索与下载 ")
+        self.notebook.add(self.tab1, text=" 🔍 Redacted 种子搜索与下载 (Search & DL) ")
         self.app1 = RedactedFinderGUI(self.tab1)
         
         # Tab 2: FLAC Downsampler
         self.tab2 = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab2, text=" 💽 FLAC 降频与制种 (24bit->16bit) ")
+        self.notebook.add(self.tab2, text=" 💽 FLAC 降频与制种 (24bit->16bit Downsampler) ")
         self.app2 = FlacDownsamplerGUI(self.tab2)
         
         # Tab 3: Lossless Checker
         self.tab3 = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab3, text=" 🎵 频谱检测与真假无损验证 ")
+        self.notebook.add(self.tab3, text=" 🎵 频谱检测与真假无损验证 (Lossless Check) ")
         self.app3 = LosslessCheckerGUI(self.tab3)
         
         # 初始化窗口尺寸与字体适配

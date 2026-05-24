@@ -43,8 +43,9 @@ class RedactedSession(requests.Session):
         elapsed = now - self.last_request_time
         if self.options.show_api_times:
             print(f" {round(elapsed, 2)} ", end="")
-        if elapsed < 3: # 严格遵守 API 的速率限制
-            time.sleep(3 - elapsed)
+        interval = getattr(self.options, 'request_interval', 3.0)
+        if elapsed < interval: # 严格遵守 API 的速率限制
+            time.sleep(interval - elapsed)
         self.last_request_time = time.monotonic()
 
     def get(self, *args, **kwargs):
@@ -406,6 +407,8 @@ class AppGUI:
         self.single_var = tk.BooleanVar(value=True)
         self.exclude_zero_snatches_var = tk.BooleanVar(value=False)
         self.auto_download_var = tk.BooleanVar(value=False)
+        
+        self.request_interval_var = tk.DoubleVar(value=3.0)
 
         # 构建界面元素
         self.build_ui()
@@ -414,7 +417,7 @@ class AppGUI:
 
     def build_ui(self):
         # --- 1. 配置区 ---
-        config_frame = ttk.LabelFrame(self.parent, text="核心配置", padding=10)
+        config_frame = ttk.LabelFrame(self.parent, text="核心配置 (Core Config)", padding=10)
         config_frame.pack(fill=tk.X, padx=10, pady=5)
 
         ttk.Label(config_frame, text="API Key:").grid(row=0, column=0, sticky=tk.W, pady=2)
@@ -423,34 +426,37 @@ class AppGUI:
         ttk.Label(config_frame, text="媒介 (Media):").grid(row=1, column=0, sticky=tk.W, pady=2)
         ttk.Combobox(config_frame, textvariable=self.media_var, values=['', 'CD', 'WEB', 'Vinyl', 'SACD', 'Cassette', 'Blu-Ray'], width=12).grid(row=1, column=1, sticky=tk.W, padx=5)
 
-        ttk.Label(config_frame, text="排序方式:").grid(row=1, column=2, sticky=tk.W, pady=2)
+        ttk.Label(config_frame, text="排序方式 (Order By):").grid(row=1, column=2, sticky=tk.W, pady=2)
         ttk.Combobox(config_frame, textvariable=self.order_by_var, values=['time', 'size', 'snatched', 'seeders', 'random'], width=12).grid(row=1, column=3, sticky=tk.W, padx=5)
 
-        ttk.Label(config_frame, text="起始年份:").grid(row=2, column=0, sticky=tk.W, pady=2)
+        ttk.Label(config_frame, text="起始年份 (Start Year):").grid(row=2, column=0, sticky=tk.W, pady=2)
         ttk.Entry(config_frame, textvariable=self.year_earliest_var, width=14).grid(row=2, column=1, sticky=tk.W, padx=5)
         
-        ttk.Label(config_frame, text="截止年份:").grid(row=2, column=2, sticky=tk.W, pady=2)
+        ttk.Label(config_frame, text="截止年份 (End Year):").grid(row=2, column=2, sticky=tk.W, pady=2)
         ttk.Entry(config_frame, textvariable=self.year_latest_var, width=14).grid(row=2, column=3, sticky=tk.W, padx=5)
 
-        ttk.Label(config_frame, text="目标数量:").grid(row=3, column=0, sticky=tk.W, pady=2)
+        ttk.Label(config_frame, text="目标数量 (Target Count):").grid(row=3, column=0, sticky=tk.W, pady=2)
         ttk.Entry(config_frame, textvariable=self.number_var, width=14).grid(row=3, column=1, sticky=tk.W, padx=5)
 
-        ttk.Label(config_frame, text="最大体积 (MB):").grid(row=3, column=2, sticky=tk.W, pady=2)
+        ttk.Label(config_frame, text="最大体积 (Max Size MB):").grid(row=3, column=2, sticky=tk.W, pady=2)
         ttk.Entry(config_frame, textvariable=self.max_size_var, width=14).grid(row=3, column=3, sticky=tk.W, padx=5)
 
+        ttk.Label(config_frame, text="请求间隔(s) (Req Interval):").grid(row=4, column=0, sticky=tk.W, pady=2)
+        ttk.Entry(config_frame, textvariable=self.request_interval_var, width=14).grid(row=4, column=1, sticky=tk.W, padx=5)
+
         # --- 2. 过滤选项区 ---
-        filter_frame = ttk.LabelFrame(self.parent, text="高级过滤选项", padding=10)
+        filter_frame = ttk.LabelFrame(self.parent, text="高级过滤选项 (Advanced Filters)", padding=10)
         filter_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        ttk.Checkbutton(filter_frame, text="仅限 Bandcamp (NYP)", variable=self.bandcamp_var).grid(row=0, column=0, sticky=tk.W, padx=5)
-        ttk.Checkbutton(filter_frame, text="忽略 Lossy 批准", variable=self.ignore_lossy_var).grid(row=0, column=1, sticky=tk.W, padx=5)
-        ttk.Checkbutton(filter_frame, text="忽略包含 16bit 的组", variable=self.ignore_16bit_var).grid(row=0, column=2, sticky=tk.W, padx=5)
-        ttk.Checkbutton(filter_frame, text="忽略 Trumpable", variable=self.ignore_trumpable_var).grid(row=0, column=3, sticky=tk.W, padx=5)
-        ttk.Checkbutton(filter_frame, text="排除 0 完成数(Snatched)", variable=self.exclude_zero_snatches_var).grid(row=1, column=0, sticky=tk.W, padx=5)
-        ttk.Checkbutton(filter_frame, text="自动下载种子", variable=self.auto_download_var).grid(row=1, column=1, sticky=tk.W, padx=5)
+        ttk.Checkbutton(filter_frame, text="仅限 Bandcamp (NYP Only)", variable=self.bandcamp_var).grid(row=0, column=0, sticky=tk.W, padx=5)
+        ttk.Checkbutton(filter_frame, text="忽略 Lossy 批准 (Ignore Lossy)", variable=self.ignore_lossy_var).grid(row=0, column=1, sticky=tk.W, padx=5)
+        ttk.Checkbutton(filter_frame, text="忽略包含 16bit 的组 (Ignore 16bit)", variable=self.ignore_16bit_var).grid(row=0, column=2, sticky=tk.W, padx=5)
+        ttk.Checkbutton(filter_frame, text="忽略 Trumpable (Ignore Trumpable)", variable=self.ignore_trumpable_var).grid(row=0, column=3, sticky=tk.W, padx=5)
+        ttk.Checkbutton(filter_frame, text="排除 0 完成数(Snatched) (Excl 0 Snatches)", variable=self.exclude_zero_snatches_var).grid(row=1, column=0, sticky=tk.W, padx=5)
+        ttk.Checkbutton(filter_frame, text="自动下载种子 (Auto DL Torrent)", variable=self.auto_download_var).grid(row=1, column=1, sticky=tk.W, padx=5)
 
         # 新增发行类型区
-        type_frame = ttk.LabelFrame(self.parent, text="发行类型筛选", padding=10)
+        type_frame = ttk.LabelFrame(self.parent, text="发行类型筛选 (Release Type)", padding=10)
         type_frame.pack(fill=tk.X, padx=10, pady=5)
         ttk.Checkbutton(type_frame, text="Album (专辑)", variable=self.album_var).grid(row=0, column=0, sticky=tk.W, padx=15)
         ttk.Checkbutton(type_frame, text="EP", variable=self.ep_var).grid(row=0, column=1, sticky=tk.W, padx=15)
@@ -460,14 +466,14 @@ class AppGUI:
         btn_frame = ttk.Frame(self.parent)
         btn_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        self.start_btn = ttk.Button(btn_frame, text="▶ 开始搜索", command=self.start_search)
+        self.start_btn = ttk.Button(btn_frame, text="▶ 开始搜索 (Start Search)", command=self.start_search)
         self.start_btn.pack(side=tk.LEFT, padx=5)
         
-        self.stop_btn = ttk.Button(btn_frame, text="⏹ 停止搜索", command=self.stop_search, state=tk.DISABLED)
+        self.stop_btn = ttk.Button(btn_frame, text="⏹ 停止搜索 (Stop Search)", command=self.stop_search, state=tk.DISABLED)
         self.stop_btn.pack(side=tk.LEFT, padx=5)
 
         # --- 4. 日志区 ---
-        log_frame = ttk.LabelFrame(self.parent, text="运行日志", padding=10)
+        log_frame = ttk.LabelFrame(self.parent, text="运行日志 (Run Logs)", padding=10)
         log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
         self.log_text = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, state=tk.NORMAL, bg="#1e1e1e", fg="#d4d4d4")
@@ -506,7 +512,8 @@ class AppGUI:
             tags=None,
             tags_type=0,
             year_earliest=self.year_earliest_var.get(),
-            year_latest=self.year_latest_var.get()
+            year_latest=self.year_latest_var.get(),
+            request_interval=self.request_interval_var.get()
         )
 
     def start_search(self):

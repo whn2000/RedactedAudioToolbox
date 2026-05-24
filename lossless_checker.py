@@ -235,20 +235,20 @@ class LosslessCheckerGUI:
         self.build_ui()
 
     def build_ui(self):
-        config_frame = ttk.LabelFrame(self.parent, text="检测配置", padding=10)
+        config_frame = ttk.LabelFrame(self.parent, text="检测配置 (Check Config)", padding=10)
         config_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        ttk.Label(config_frame, text="待检测专辑文件夹:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        ttk.Label(config_frame, text="待检测专辑文件夹 (Album Dir):").grid(row=0, column=0, sticky=tk.W, pady=2)
         ttk.Entry(config_frame, textvariable=self.input_dir_var, width=50).grid(row=0, column=1, sticky=tk.W, padx=5)
-        ttk.Button(config_frame, text="浏览...", command=self.browse_dir).grid(row=0, column=2, padx=5)
+        ttk.Button(config_frame, text="浏览... (Browse...)", command=self.browse_dir).grid(row=0, column=2, padx=5)
 
         btn_frame = ttk.Frame(self.parent)
         btn_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        self.start_btn = ttk.Button(btn_frame, text="▶ 开始无损检测", command=self.start_process)
+        self.start_btn = ttk.Button(btn_frame, text="▶ 开始无损检测 (Start Lossless Check)", command=self.start_process)
         self.start_btn.pack(side=tk.LEFT, padx=5)
 
-        log_frame = ttk.LabelFrame(self.parent, text="检测报告与运行日志", padding=10)
+        log_frame = ttk.LabelFrame(self.parent, text="检测报告与运行日志 (Report & Logs)", padding=10)
         log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
         self.log_text = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, state=tk.NORMAL, bg="#1e1e1e", fg="#d4d4d4")

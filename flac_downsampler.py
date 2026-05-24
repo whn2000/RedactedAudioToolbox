@@ -201,26 +201,26 @@ class FlacDownsamplerGUI:
         self.build_ui()
 
     def build_ui(self):
-        config_frame = ttk.LabelFrame(self.parent, text="配置项", padding=10)
+        config_frame = ttk.LabelFrame(self.parent, text="配置项 (Configuration)", padding=10)
         config_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        ttk.Label(config_frame, text="专辑主文件夹:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        ttk.Label(config_frame, text="专辑主文件夹 (Album Dir):").grid(row=0, column=0, sticky=tk.W, pady=2)
         ttk.Entry(config_frame, textvariable=self.input_dir_var, width=50).grid(row=0, column=1, sticky=tk.W, padx=5)
-        ttk.Button(config_frame, text="浏览...", command=self.browse_dir).grid(row=0, column=2, padx=5)
+        ttk.Button(config_frame, text="浏览... (Browse...)", command=self.browse_dir).grid(row=0, column=2, padx=5)
 
         ttk.Label(config_frame, text="Tracker URL:").grid(row=1, column=0, sticky=tk.W, pady=2)
         ttk.Entry(config_frame, textvariable=self.tracker_var, width=50).grid(row=1, column=1, sticky=tk.W, padx=5)
 
-        ttk.Label(config_frame, text="Source 标识:").grid(row=2, column=0, sticky=tk.W, pady=2)
+        ttk.Label(config_frame, text="Source 标识 (Source Flag):").grid(row=2, column=0, sticky=tk.W, pady=2)
         ttk.Entry(config_frame, textvariable=self.source_var, width=20).grid(row=2, column=1, sticky=tk.W, padx=5)
 
         btn_frame = ttk.Frame(self.parent)
         btn_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        self.start_btn = ttk.Button(btn_frame, text="▶ 开始降频与制种", command=self.start_process)
+        self.start_btn = ttk.Button(btn_frame, text="▶ 开始降频与制种 (Start Downsample & Make Torrent)", command=self.start_process)
         self.start_btn.pack(side=tk.LEFT, padx=5)
 
-        log_frame = ttk.LabelFrame(self.parent, text="运行日志", padding=10)
+        log_frame = ttk.LabelFrame(self.parent, text="运行日志 (Run Logs)", padding=10)
         log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
         self.log_text = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, state=tk.NORMAL, bg="#1e1e1e", fg="#d4d4d4")
