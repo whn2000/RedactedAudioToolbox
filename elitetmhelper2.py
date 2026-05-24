@@ -256,18 +256,21 @@ def search_result_iterator(session, options, found, abort_flag):
                     continue
                 seen_groups.add(group_id)
                 
-                rt = group.get("releaseType", 1)
-                if rt == 1 and not options.allow_album: continue
-                if rt == 5 and not options.allow_ep: continue
-                if rt == 9 and not options.allow_single: continue
+                rt = group.get("releaseType")
+                if isinstance(rt, str) and not rt.isdigit():
+                    # Handle cases where releaseType might be a string like 'Anthology'
+                    rt = 1 # Fallback or map it to a default/corresponding value, though typically API should return ID.
+                else:
+                    rt = int(rt or 1)
                 
-                if any(map(lambda x: x["size"] > options.max_size, group["torrents"])):
-                    if options.order_by == "size" and options.order_way == "asc":
+                if not options.release_type_allowed.get(rt, False): continue
+                
+                if options.order_by == "size" and options.order_way == "asc":
+                    if any(map(lambda x: x.get("size", 0) > options.max_size, group.get("torrents", []))):
                         exceded_max_size = True
                         print("文件超出最大体积限制，跳过...")
                         break
-                else:
-                    yield group
+                yield group
                     
             if exceded_max_size:
                 continue
@@ -298,18 +301,20 @@ def search_result_iterator(session, options, found, abort_flag):
                         continue
                     seen_groups.add(group_id)
                     
-                    rt = group.get("releaseType", 1)
-                    if rt == 1 and not options.allow_album: continue
-                    if rt == 5 and not options.allow_ep: continue
-                    if rt == 9 and not options.allow_single: continue
+                    rt = group.get("releaseType")
+                    if isinstance(rt, str) and not rt.isdigit():
+                        rt = 1
+                    else:
+                        rt = int(rt or 1)
+                        
+                    if not options.release_type_allowed.get(rt, False): continue
                     
-                    if any(map(lambda x: x["size"] > options.max_size, group["torrents"])):
-                        if options.order_by == "size" and options.order_way == "asc":
+                    if options.order_by == "size" and options.order_way == "asc":
+                        if any(map(lambda x: x.get("size", 0) > options.max_size, group.get("torrents", []))):
                             exceded_max_size = True
                             print("文件超出最大体积限制，跳过...")
                             break
-                    else:
-                        yield group
+                    yield group
                 if exceded_max_size:
                     break
 
@@ -389,6 +394,7 @@ def perform_search(options, abort_flag):
                 if options.uns and this_torrent.uns(): nope.append(" un")
                 if options.min_seeders and this_torrent.seeders < options.min_seeders: nope.append(" sd")
                 if options.exclude_zero_snatches and this_torrent.snatched == 0: nope.append(" 0snatches")
+                if options.max_size and torrent.get("size", 0) > options.max_size: nope.append(" >max_size")
 
                 if nope == [""]:
                     found += 1
@@ -522,8 +528,20 @@ class AppGUI:
         self.ignore_16bit_var = tk.BooleanVar(value=False)
         self.ignore_trumpable_var = tk.BooleanVar(value=False)
         self.album_var = tk.BooleanVar(value=True)
+        self.soundtrack_var = tk.BooleanVar(value=True)
         self.ep_var = tk.BooleanVar(value=True)
+        self.anthology_var = tk.BooleanVar(value=True)
+        self.compilation_var = tk.BooleanVar(value=True)
         self.single_var = tk.BooleanVar(value=True)
+        self.live_album_var = tk.BooleanVar(value=True)
+        self.remix_var = tk.BooleanVar(value=True)
+        self.bootleg_var = tk.BooleanVar(value=True)
+        self.interview_var = tk.BooleanVar(value=True)
+        self.mixtape_var = tk.BooleanVar(value=True)
+        self.demo_var = tk.BooleanVar(value=True)
+        self.unknown_var = tk.BooleanVar(value=True)
+        self.concert_recording_var = tk.BooleanVar(value=True)
+        self.dj_mix_var = tk.BooleanVar(value=True)
         self.exclude_zero_snatches_var = tk.BooleanVar(value=False)
         self.auto_download_var = tk.BooleanVar(value=False)
         
@@ -571,8 +589,20 @@ class AppGUI:
                     if 'ignore_16bit' in config: self.ignore_16bit_var.set(config['ignore_16bit'])
                     if 'ignore_trumpable' in config: self.ignore_trumpable_var.set(config['ignore_trumpable'])
                     if 'album' in config: self.album_var.set(config['album'])
+                    if 'soundtrack' in config: self.soundtrack_var.set(config['soundtrack'])
                     if 'ep' in config: self.ep_var.set(config['ep'])
+                    if 'anthology' in config: self.anthology_var.set(config['anthology'])
+                    if 'compilation' in config: self.compilation_var.set(config['compilation'])
                     if 'single' in config: self.single_var.set(config['single'])
+                    if 'live_album' in config: self.live_album_var.set(config['live_album'])
+                    if 'remix' in config: self.remix_var.set(config['remix'])
+                    if 'bootleg' in config: self.bootleg_var.set(config['bootleg'])
+                    if 'interview' in config: self.interview_var.set(config['interview'])
+                    if 'mixtape' in config: self.mixtape_var.set(config['mixtape'])
+                    if 'demo' in config: self.demo_var.set(config['demo'])
+                    if 'unknown' in config: self.unknown_var.set(config['unknown'])
+                    if 'concert_recording' in config: self.concert_recording_var.set(config['concert_recording'])
+                    if 'dj_mix' in config: self.dj_mix_var.set(config['dj_mix'])
                     if 'exclude_zero_snatches' in config: self.exclude_zero_snatches_var.set(config['exclude_zero_snatches'])
                     if 'auto_download' in config: self.auto_download_var.set(config['auto_download'])
                     
@@ -607,8 +637,20 @@ class AppGUI:
                 'ignore_16bit': self.ignore_16bit_var.get(),
                 'ignore_trumpable': self.ignore_trumpable_var.get(),
                 'album': self.album_var.get(),
+                'soundtrack': self.soundtrack_var.get(),
                 'ep': self.ep_var.get(),
+                'anthology': self.anthology_var.get(),
+                'compilation': self.compilation_var.get(),
                 'single': self.single_var.get(),
+                'live_album': self.live_album_var.get(),
+                'remix': self.remix_var.get(),
+                'bootleg': self.bootleg_var.get(),
+                'interview': self.interview_var.get(),
+                'mixtape': self.mixtape_var.get(),
+                'demo': self.demo_var.get(),
+                'unknown': self.unknown_var.get(),
+                'concert_recording': self.concert_recording_var.get(),
+                'dj_mix': self.dj_mix_var.get(),
                 'exclude_zero_snatches': self.exclude_zero_snatches_var.get(),
                 'auto_download': self.auto_download_var.get(),
                 
@@ -685,9 +727,18 @@ class AppGUI:
         type_frame = ctk.CTkFrame(self.scrollable_frame)
         type_frame.pack(fill=tk.X, padx=5, pady=5)
         ctk.CTkLabel(type_frame, text=_("release_type"), font=("", 16, "bold")).grid(row=0, column=0, columnspan=3, sticky=tk.W, pady=5, padx=5)
-        ctk.CTkCheckBox(type_frame, text=_("album"), variable=self.album_var).grid(row=1, column=0, sticky=tk.W, padx=15, pady=5)
-        ctk.CTkCheckBox(type_frame, text=_("ep"), variable=self.ep_var).grid(row=1, column=1, sticky=tk.W, padx=15, pady=5)
-        ctk.CTkCheckBox(type_frame, text=_("single"), variable=self.single_var).grid(row=1, column=2, sticky=tk.W, padx=15, pady=5)
+        types_list = [
+            (self.album_var, "Album"), (self.soundtrack_var, "Soundtrack"), (self.ep_var, "EP"), 
+            (self.anthology_var, "Anthology"), (self.compilation_var, "Compilation"), (self.single_var, "Single"), 
+            (self.live_album_var, "Live album"), (self.remix_var, "Remix"), (self.bootleg_var, "Bootleg"), 
+            (self.interview_var, "Interview"), (self.mixtape_var, "Mixtape"), (self.demo_var, "Demo"), 
+            (self.concert_recording_var, "Concert Recording"), (self.dj_mix_var, "DJ Mix"), (self.unknown_var, "Unknown")
+        ]
+        
+        for idx, (var, text) in enumerate(types_list):
+            row = 1 + idx // 3
+            col = idx % 3
+            ctk.CTkCheckBox(type_frame, text=text, variable=var).grid(row=row, column=col, sticky=tk.W, padx=15, pady=5)
 
         pipeline_frame = ctk.CTkFrame(self.scrollable_frame)
         pipeline_frame.pack(fill=tk.X, padx=5, pady=5)
@@ -720,10 +771,26 @@ class AppGUI:
         log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(5, 10))
         ctk.CTkLabel(log_frame, text=_("run_logs"), font=("", 16, "bold")).pack(anchor=tk.W, padx=5, pady=5)
         
-        self.log_text = ctk.CTkTextbox(log_frame, wrap=tk.WORD)
-        self.log_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.log_tabs = ctk.CTkTabview(log_frame)
+        self.log_tabs.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        self.log_tabs.add("主日志")
+        self.log_tabs.add("处理日志")
+        self.log_tabs.add("检测日志")
+        
+        self.log_text_main = ctk.CTkTextbox(self.log_tabs.tab("主日志"), wrap=tk.WORD)
+        self.log_text_main.pack(fill=tk.BOTH, expand=True)
+        
+        self.log_text_process = ctk.CTkTextbox(self.log_tabs.tab("处理日志"), wrap=tk.WORD)
+        self.log_text_process.pack(fill=tk.BOTH, expand=True)
+        
+        self.log_text_check = ctk.CTkTextbox(self.log_tabs.tab("检测日志"), wrap=tk.WORD)
+        self.log_text_check.pack(fill=tk.BOTH, expand=True)
 
-        sys.stdout = RedirectText(self.log_text)
+        sys.stdout = RedirectText(self.log_text_main)
+        self.log_main = RedirectText(self.log_text_main)
+        self.log_process = RedirectText(self.log_text_process)
+        self.log_check = RedirectText(self.log_text_check)
 
     def browse_save_path(self):
         directory = filedialog.askdirectory()
@@ -761,9 +828,23 @@ class AppGUI:
             release_type="",
             exclude_zero_snatches=self.exclude_zero_snatches_var.get(),
             auto_download=self.auto_download_var.get(),
-            allow_album=self.album_var.get(),
-            allow_ep=self.ep_var.get(),
-            allow_single=self.single_var.get(),
+            release_type_allowed={
+                1: self.album_var.get(),
+                3: self.soundtrack_var.get(),
+                5: self.ep_var.get(),
+                6: self.anthology_var.get(),
+                7: self.compilation_var.get(),
+                9: self.single_var.get(),
+                11: self.live_album_var.get(),
+                13: self.remix_var.get(),
+                14: self.bootleg_var.get(),
+                15: self.interview_var.get(),
+                16: self.mixtape_var.get(),
+                17: self.demo_var.get(),
+                21: self.unknown_var.get(),
+                22: self.concert_recording_var.get(),
+                23: self.dj_mix_var.get()
+            },
             buffer_limit=self._safe_float(self.buffer_limit_var, 10.0),
             buffer_formula=self.buffer_formula_var.get(),
             use_fl_token=self.use_fl_token_var.get(),
@@ -793,10 +874,25 @@ class AppGUI:
         self.is_running = True
         self.start_btn.configure(state=tk.DISABLED)
         self.stop_btn.configure(state=tk.NORMAL)
-        self.log_text.delete(1.0, tk.END)
+        self.log_text_main.delete(1.0, tk.END)
+        self.log_text_process.delete(1.0, tk.END)
+        self.log_text_check.delete(1.0, tk.END)
         print(">>> 正在启动后台搜索线程，请稍候...\n")
 
         threading.Thread(target=self.run_thread, daemon=True).start()
+
+    def ask_manual_check(self, album_name):
+        result_event = threading.Event()
+        result_var = [False]
+
+        def show_prompt():
+            res = messagebox.askyesno("人工确认", f"种子 {album_name} 无损检测未通过。\n您是否确认该种子没有问题，并继续上传发布？", parent=self.parent)
+            result_var[0] = res
+            result_event.set()
+
+        self.parent.after(0, show_prompt)
+        result_event.wait()
+        return result_var[0]
 
     def stop_search(self):
         self.is_running = False
@@ -813,7 +909,11 @@ class AppGUI:
                     from pipeline_manager import PipelineManager
                     pipeline = PipelineManager(
                         options.qb_host, options.qb_port, options.qb_user, options.qb_pass,
-                        None, options, log_callback=print
+                        None, options, 
+                        log_main=lambda s: self.log_main.write(s + "\n"),
+                        log_process=lambda s: self.log_process.write(s + "\n"),
+                        log_check=lambda s: self.log_check.write(s + "\n"),
+                        ask_manual_check=self.ask_manual_check
                     )
                     pipeline.start()
                     options.pipeline = pipeline

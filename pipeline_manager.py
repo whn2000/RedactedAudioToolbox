@@ -10,11 +10,14 @@ from lossless_checker import process_album as check_lossless_album
 import traceback
 
 class PipelineManager:
-    def __init__(self, qb_host, qb_port, qb_user, qb_pass, red_session, red_options, log_callback=print):
+    def __init__(self, qb_host, qb_port, qb_user, qb_pass, red_session, red_options, log_main=print, log_process=print, log_check=print, ask_manual_check=None):
         self.qb = QbittorrentClient(qb_host, qb_port, qb_user, qb_pass)
         self.red_session = red_session
         self.red_options = red_options
-        self.log = log_callback
+        self.log_main = log_main
+        self.log_process = log_process
+        self.log_check = log_check
+        self.ask_manual_check = ask_manual_check
         self.is_running = False
         self.monitor_thread = None
         self.tracked_torrents = {} # hash -> dict(group_info, torrent_info)
@@ -30,21 +33,21 @@ class PipelineManager:
     def start(self):
         if self.is_running: return
         self.is_running = True
-        self.log(">>> 自动处理流水线监控已启动...")
+        self.log_main(">>> 自动处理流水线监控已启动...")
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.monitor_thread.start()
 
     def stop(self):
         self.is_running = False
-        self.log(">>> 自动处理流水线监控已停止。")
+        self.log_main(">>> 自动处理流水线监控已停止。")
 
     def add_to_pipeline(self, torrent_path, group_info, torrent_info, save_path):
         """将种子添加到 qB 并加入追踪列表"""
         success = self.qb.add_torrent(torrent_path, save_path=save_path, category="red_auto")
         if success:
-            self.log(f"    [Pipeline] 已成功推送到 qBittorrent: {Path(torrent_path).name}")
+            self.log_main(f"    [Pipeline] 已成功推送到 qBittorrent: {Path(torrent_path).name}")
         else:
-            self.log(f"    [Pipeline] ❌ 推送 qBittorrent 失败: {Path(torrent_path).name}")
+            self.log_main(f"    [Pipeline] ❌ 推送 qBittorrent 失败: {Path(torrent_path).name}")
 
     def _monitor_loop(self):
         while self.is_running:
@@ -68,7 +71,7 @@ class PipelineManager:
                                 json.dump(list(self.processed_hashes), f)
                         except Exception:
                             pass
-                        self.log(f"    [Pipeline] 📥 下载完成，准备处理: {name}")
+                        self.log_main(f"    [Pipeline] 📥 下载完成，准备处理: {name}")
                         
                         # 改变类别防止重复触发 (备用)
                         self._change_category(hash_str, "red_processed")
@@ -77,7 +80,7 @@ class PipelineManager:
                         threading.Thread(target=self._process_downloaded_torrent, args=(save_path, name, t), daemon=True).start()
 
             except Exception as e:
-                self.log(f"    [Pipeline] 监控出现异常: {e}")
+                self.log_main(f"    [Pipeline] 监控出现异常: {e}")
                 
             time.sleep(10) # 每 10 秒轮询一次
 
@@ -92,17 +95,17 @@ class PipelineManager:
         try:
             album_dir = Path(save_path) / name
             if not album_dir.exists() or not album_dir.is_dir():
-                self.log(f"    [Pipeline] ❌ 找不到下载的文件夹: {album_dir}")
+                self.log_process(f"    [Pipeline] ❌ 找不到下载的文件夹: {album_dir}")
                 return
 
             output_dir = album_dir.parent / f"{album_dir.name} (16bit)"
             official_torrent = album_dir.parent / f"{output_dir.name}_official.torrent"
             
             if official_torrent.exists():
-                self.log(f"    [Pipeline] ⏭️ 发现本地已存在官方种子 ({official_torrent.name})，说明此前已成功上传，跳过重复处理。")
+                self.log_process(f"    [Pipeline] ⏭️ 发现本地已存在官方种子 ({official_torrent.name})，说明此前已成功上传，跳过重复处理。")
                 return
 
-            self.log(f"    [Pipeline] 💿 开始降频制种: {name}")
+            self.log_process(f"    [Pipeline] 💿 开始降频制种: {name}")
             # 1. 降频
             # flac_downsampler 的 process_album 其实处理的是单张专辑目录
             # 我们需要获取 group_info, 这个目前没有传给 qb，我们可以通过解析目录里的 metadata 或直接盲转
@@ -113,17 +116,26 @@ class PipelineManager:
             # 找到生成的 16bit 目录
             output_dir = album_dir.parent / f"{album_dir.name} (16bit)"
             if not output_dir.exists():
-                self.log(f"    [Pipeline] ⚠️ 降频未生成 16bit 文件夹（可能原本就是 16bit）: {name}")
+                self.log_process(f"    [Pipeline] ⚠️ 降频未生成 16bit 文件夹（可能原本就是 16bit）: {name}")
                 return
 
-            self.log(f"    [Pipeline] 🎵 开始进行无损检查: {output_dir.name}")
+            self.log_check(f"    [Pipeline] 🎵 开始进行无损检查: {output_dir.name}")
             # 2. 检查无损 (Fast Mode)
             is_lossless = check_lossless_album(output_dir, fast_mode=True)
             if not is_lossless:
-                self.log(f"    [Pipeline] 🚨 警告: 假无损检测未通过，已中止自动上传: {output_dir.name}")
-                return
+                self.log_check(f"    [Pipeline] 🚨 警告: 假无损检测未通过: {output_dir.name}")
+                if self.ask_manual_check:
+                    self.log_check(f"    [Pipeline] ⏳ 正在等待人工确认: {output_dir.name}")
+                    user_confirmed = self.ask_manual_check(output_dir.name)
+                    if not user_confirmed:
+                        self.log_check(f"    [Pipeline] 🛑 人工确认未通过，已中止自动上传: {output_dir.name}")
+                        return
+                    self.log_check(f"    [Pipeline] 👍 人工确认通过，继续发布流程: {output_dir.name}")
+                else:
+                    self.log_check(f"    [Pipeline] 🛑 且未配置人工确认，已中止自动上传: {output_dir.name}")
+                    return
                 
-            self.log(f"    [Pipeline] ✅ 无损检测通过，准备上传到 RED: {output_dir.name}")
+            self.log_check(f"    [Pipeline] ✅ 无损检测通过 (或人工放行)，准备上传: {output_dir.name}")
             
             # 3. 自动上传 (从本地 .json 恢复 Context)
             json_meta_path = None
@@ -144,7 +156,7 @@ class PipelineManager:
                     pass
             
             if not json_meta_path:
-                self.log(f"    [Pipeline] ❌ 找不到元数据辅助文件 (按 Hash {hash_str_lower} 匹配失败)，无法执行自动上传。")
+                self.log_main(f"    [Pipeline] ❌ 找不到元数据辅助文件 (按 Hash {hash_str_lower} 匹配失败)，无法执行自动上传。")
                 return
                 
             with open(json_meta_path, 'r', encoding='utf-8') as f:
@@ -188,7 +200,7 @@ class PipelineManager:
             # 寻找生成的 torrent 文件
             generated_torrent = album_dir.parent / f"{output_dir.name}.torrent"
             if not generated_torrent.exists():
-                self.log(f"    [Pipeline] ❌ 找不到生成的种子文件: {generated_torrent.name}")
+                self.log_main(f"    [Pipeline] ❌ 找不到生成的种子文件: {generated_torrent.name}")
                 return
                 
             # 执行上传
@@ -198,7 +210,7 @@ class PipelineManager:
                 'User-Agent': 'EliteTMHelper_AutoUpload'
             }
             
-            self.log(f"    [Pipeline] 🚀 正在向 RED 提交 POST 请求...")
+            self.log_main(f"    [Pipeline] 🚀 正在向 RED 提交 POST 请求...")
             with open(generated_torrent, 'rb') as f:
                 files = {'file_input': (generated_torrent.name, f, 'application/x-bittorrent')}
                 # 注意：requests 在传递 dict 到 data 时，不要将 headers 设为 multipart/form-data，requests 会自动处理 boundary
@@ -210,11 +222,11 @@ class PipelineManager:
                     if resp_json.get('status') == 'success':
                         new_torrent_id = resp_json['response']['torrentid']
                         new_link = f"https://redacted.sh/torrents.php?id={group_id}&torrentid={new_torrent_id}"
-                        self.log(f"    [Pipeline] 🎉 自动上传成功！")
-                        self.log(f"    [Pipeline] 🔗 新种子链接: {new_link}")
+                        self.log_main(f"    [Pipeline] 🎉 自动上传成功！")
+                        self.log_main(f"    [Pipeline] 🔗 新种子链接: {new_link}")
                         
                         # 成功上传后，必须从 RED 下载打上了官方 tracker passkey 和 source 标记的新种子
-                        self.log(f"    [Pipeline] 📥 正在从 RED 下载官方种子文件以进行做种...")
+                        self.log_main(f"    [Pipeline] 📥 正在从 RED 下载官方种子文件以进行做种...")
                         dl_url = f"https://redacted.sh/ajax.php?action=download&id={new_torrent_id}"
                         dl_resp = requests.get(dl_url, headers=headers, timeout=30)
                         
@@ -222,20 +234,20 @@ class PipelineManager:
                             official_torrent = album_dir.parent / f"{output_dir.name}_official.torrent"
                             official_torrent.write_bytes(dl_resp.content)
                             
-                            self.log(f"    [Pipeline] 🔄 正在将官方 16bit 新种子加入 qBittorrent 做种...")
+                            self.log_process(f"    [Pipeline] 🔄 正在将官方 16bit 新种子加入 qBittorrent 做种...")
                             self.qb.add_torrent(str(official_torrent), save_path=str(album_dir.parent), category="red_seeding")
                         else:
-                            self.log(f"    [Pipeline] ❌ 下载官方种子失败 (状态码: {dl_resp.status_code})，请手动前往网站下载并做种。")
+                            self.log_main(f"    [Pipeline] ❌ 下载官方种子失败 (状态码: {dl_resp.status_code})，请手动前往网站下载并做种。")
                             
                     else:
-                        self.log(f"    [Pipeline] ❌ 上传 API 返回失败状态: {resp_json}")
+                        self.log_main(f"    [Pipeline] ❌ 上传 API 返回失败状态: {resp_json}")
                 except Exception as e:
-                    self.log(f"    [Pipeline] ❌ 上传成功但解析返回 JSON 失败: {e} | Resp: {resp.text[:200]}")
+                    self.log_main(f"    [Pipeline] ❌ 上传成功但解析返回 JSON 失败: {e} | Resp: {resp.text[:200]}")
             else:
-                self.log(f"    [Pipeline] ❌ 上传 HTTP 请求失败, 状态码: {resp.status_code}")
-                self.log(f"    [Pipeline] {resp.text[:500]}")
+                self.log_main(f"    [Pipeline] ❌ 上传 HTTP 请求失败, 状态码: {resp.status_code}")
+                self.log_main(f"    [Pipeline] {resp.text[:500]}")
 
         except Exception as e:
-            self.log(f"    [Pipeline] ❌ 处理流水线异常: {e}")
+            self.log_main(f"    [Pipeline] ❌ 处理流水线异常: {e}")
             traceback.print_exc()
 
