@@ -229,6 +229,9 @@ def process_album(album_dir, output_dir=None, fast_mode=False):
     return all_lossless
 
 
+import customtkinter as ctk
+from i18n import _
+
 class RedirectText:
     def __init__(self, text_ctrl):
         self.output = text_ctrl
@@ -250,26 +253,31 @@ class LosslessCheckerGUI:
         self.build_ui()
 
     def build_ui(self):
-        config_frame = ttk.LabelFrame(self.parent, text="检测配置 (Check Config)", padding=10)
-        config_frame.pack(fill=tk.X, padx=10, pady=5)
+        self.scrollable_frame = ctk.CTkScrollableFrame(self.parent)
+        self.scrollable_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        ttk.Label(config_frame, text="待检测专辑文件夹 (Album Dir):").grid(row=0, column=0, sticky=tk.W, pady=2)
-        ttk.Entry(config_frame, textvariable=self.input_dir_var, width=50).grid(row=0, column=1, sticky=tk.W, padx=5)
-        ttk.Button(config_frame, text="浏览... (Browse...)", command=self.browse_dir).grid(row=0, column=2, padx=5)
+        config_frame = ctk.CTkFrame(self.scrollable_frame)
+        config_frame.pack(fill=tk.X, padx=5, pady=5)
+        ctk.CTkLabel(config_frame, text=_("config"), font=("", 16, "bold")).grid(row=0, column=0, columnspan=3, sticky=tk.W, pady=5, padx=5)
 
-        ttk.Checkbutton(config_frame, text="快速模式 (仅检查不生成可视图形)", variable=self.fast_mode_var).grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=5)
+        ctk.CTkLabel(config_frame, text=_("album_dir")).grid(row=1, column=0, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkEntry(config_frame, textvariable=self.input_dir_var, width=400).grid(row=1, column=1, sticky=tk.W, padx=5)
+        ctk.CTkButton(config_frame, text=_("browse"), command=self.browse_dir, width=80).grid(row=1, column=2, padx=5)
 
-        btn_frame = ttk.Frame(self.parent)
-        btn_frame.pack(fill=tk.X, padx=10, pady=5)
+        ctk.CTkCheckBox(config_frame, text="快速模式 (仅检查不生成可视图形)", variable=self.fast_mode_var).grid(row=2, column=0, columnspan=3, sticky=tk.W, pady=10, padx=5)
+
+        btn_frame = ctk.CTkFrame(self.scrollable_frame, fg_color="transparent")
+        btn_frame.pack(fill=tk.X, padx=5, pady=10)
         
-        self.start_btn = ttk.Button(btn_frame, text="▶ 开始无损检测 (Start Lossless Check)", command=self.start_process)
+        self.start_btn = ctk.CTkButton(btn_frame, text=_("start_check"), command=self.start_process, fg_color="#28a745", hover_color="#218838")
         self.start_btn.pack(side=tk.LEFT, padx=5)
 
-        log_frame = ttk.LabelFrame(self.parent, text="检测报告与运行日志 (Report & Logs)", padding=10)
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        log_frame = ctk.CTkFrame(self.scrollable_frame)
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        ctk.CTkLabel(log_frame, text=_("run_logs"), font=("", 16, "bold")).pack(anchor=tk.W, padx=5, pady=5)
         
-        self.log_text = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, state=tk.NORMAL, bg="#1e1e1e", fg="#d4d4d4")
-        self.log_text.pack(fill=tk.BOTH, expand=True)
+        self.log_text = ctk.CTkTextbox(log_frame, wrap=tk.WORD)
+        self.log_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
     def browse_dir(self):
         dir_path = filedialog.askdirectory()
@@ -281,7 +289,7 @@ class LosslessCheckerGUI:
             tk.messagebox.showwarning("提示", "请选择要检测的专辑文件夹！")
             return
             
-        self.start_btn.config(state=tk.DISABLED)
+        self.start_btn.configure(state=tk.DISABLED)
         self.log_text.delete(1.0, tk.END)
         
         threading.Thread(target=self.run_thread, daemon=True).start()
@@ -297,7 +305,10 @@ class LosslessCheckerGUI:
             print(f"\n❌ [错误]: {str(e)}")
         finally:
             sys.stdout = old_stdout
-            self.parent.after(0, lambda: self.start_btn.config(state=tk.NORMAL))
+            try:
+                self.parent.after(0, lambda: self.start_btn.configure(state=tk.NORMAL))
+            except:
+                pass
 
 if __name__ == "__main__":
     pass

@@ -485,6 +485,9 @@ def perform_search(options, abort_flag):
 # 桌面图形界面 GUI 逻辑
 # ==========================================
 
+import customtkinter as ctk
+from i18n import _
+
 class RedirectText:
     """拦截 print 输出并重定向到 Tkinter 文本框"""
     def __init__(self, text_ctrl):
@@ -502,7 +505,6 @@ class AppGUI:
         self.parent = parent
         self.is_running = False
         
-        # 定义界面绑定的变量
         self.api_key_var = tk.StringVar()
         self.save_path_var = tk.StringVar()
         self.media_var = tk.StringVar(value="CD")
@@ -512,22 +514,20 @@ class AppGUI:
         self.max_size_var = tk.IntVar(value=2048)
         self.order_by_var = tk.StringVar(value="time")
         
-        # 布尔开关
         self.bandcamp_var = tk.BooleanVar(value=False)
         self.ignore_lossy_var = tk.BooleanVar(value=False)
         self.ignore_16bit_var = tk.BooleanVar(value=False)
         self.ignore_trumpable_var = tk.BooleanVar(value=False)
-        
         self.album_var = tk.BooleanVar(value=True)
         self.ep_var = tk.BooleanVar(value=True)
         self.single_var = tk.BooleanVar(value=True)
         self.exclude_zero_snatches_var = tk.BooleanVar(value=False)
         self.auto_download_var = tk.BooleanVar(value=False)
         
-        self.buffer_limit_var = tk.DoubleVar(value=10.0) # GB
+        self.buffer_limit_var = tk.DoubleVar(value=10.0)
         self.buffer_formula_var = tk.StringVar(value="(U / 0.65) - D")
         self.use_fl_token_var = tk.BooleanVar(value=False)
-        self.fl_token_threshold_var = tk.IntVar(value=500) # MB
+        self.fl_token_threshold_var = tk.IntVar(value=500)
         
         self.qb_host_var = tk.StringVar(value="http://127.0.0.1")
         self.qb_port_var = tk.StringVar(value="8080")
@@ -540,7 +540,6 @@ class AppGUI:
         self.config_file = "config.json"
         self.load_config()
 
-        # 构建界面元素
         self.build_ui()
 
     def load_config(self):
@@ -548,12 +547,9 @@ class AppGUI:
             if Path(self.config_file).exists():
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     config = json.load(f)
-                    if 'api_key' in config:
-                        self.api_key_var.set(config['api_key'])
-                    if 'save_path' in config:
-                        self.save_path_var.set(config['save_path'])
-                    if 'buffer_formula' in config:
-                        self.buffer_formula_var.set(config['buffer_formula'])
+                    if 'api_key' in config: self.api_key_var.set(config['api_key'])
+                    if 'save_path' in config: self.save_path_var.set(config['save_path'])
+                    if 'buffer_formula' in config: self.buffer_formula_var.set(config['buffer_formula'])
                     if 'qb_host' in config: self.qb_host_var.set(config['qb_host'])
                     if 'qb_port' in config: self.qb_port_var.set(config['qb_port'])
                     if 'qb_user' in config: self.qb_user_var.set(config['qb_user'])
@@ -580,101 +576,103 @@ class AppGUI:
             print(f"Failed to save config: {e}")
 
     def build_ui(self):
-        # --- 1. 配置区 ---
-        config_frame = ttk.LabelFrame(self.parent, text="核心配置 (Core Config)", padding=10)
-        config_frame.pack(fill=tk.X, padx=10, pady=5)
+        self.scrollable_frame = ctk.CTkScrollableFrame(self.parent)
+        self.scrollable_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        ttk.Label(config_frame, text="API Key:").grid(row=0, column=0, sticky=tk.W, pady=2)
-        ttk.Entry(config_frame, textvariable=self.api_key_var, width=50, show="*").grid(row=0, column=1, columnspan=3, sticky=tk.W, padx=5)
+        config_frame = ctk.CTkFrame(self.scrollable_frame)
+        config_frame.pack(fill=tk.X, padx=5, pady=5)
+        ctk.CTkLabel(config_frame, text=_("core_config"), font=("", 16, "bold")).grid(row=0, column=0, columnspan=4, sticky=tk.W, pady=5, padx=5)
 
-        ttk.Label(config_frame, text="媒介 (Media):").grid(row=1, column=0, sticky=tk.W, pady=2)
-        ttk.Combobox(config_frame, textvariable=self.media_var, values=['', 'CD', 'WEB', 'Vinyl', 'SACD', 'Cassette', 'Blu-Ray'], width=12).grid(row=1, column=1, sticky=tk.W, padx=5)
+        ctk.CTkLabel(config_frame, text=_("api_key")).grid(row=1, column=0, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkEntry(config_frame, textvariable=self.api_key_var, width=300, show="*").grid(row=1, column=1, columnspan=3, sticky=tk.W, padx=5)
 
-        ttk.Label(config_frame, text="排序方式 (Order By):").grid(row=1, column=2, sticky=tk.W, pady=2)
-        ttk.Combobox(config_frame, textvariable=self.order_by_var, values=['time', 'size', 'snatched', 'seeders', 'random'], width=12).grid(row=1, column=3, sticky=tk.W, padx=5)
+        ctk.CTkLabel(config_frame, text=_("media")).grid(row=2, column=0, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkComboBox(config_frame, variable=self.media_var, values=['', 'CD', 'WEB', 'Vinyl', 'SACD', 'Cassette', 'Blu-Ray'], width=120).grid(row=2, column=1, sticky=tk.W, padx=5)
 
-        ttk.Label(config_frame, text="起始年份 (Start Year):").grid(row=2, column=0, sticky=tk.W, pady=2)
-        ttk.Entry(config_frame, textvariable=self.year_earliest_var, width=14).grid(row=2, column=1, sticky=tk.W, padx=5)
+        ctk.CTkLabel(config_frame, text=_("order_by")).grid(row=2, column=2, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkComboBox(config_frame, variable=self.order_by_var, values=['time', 'size', 'snatched', 'seeders', 'random'], width=120).grid(row=2, column=3, sticky=tk.W, padx=5)
+
+        ctk.CTkLabel(config_frame, text=_("start_year")).grid(row=3, column=0, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkEntry(config_frame, textvariable=self.year_earliest_var, width=120).grid(row=3, column=1, sticky=tk.W, padx=5)
         
-        ttk.Label(config_frame, text="截止年份 (End Year):").grid(row=2, column=2, sticky=tk.W, pady=2)
-        ttk.Entry(config_frame, textvariable=self.year_latest_var, width=14).grid(row=2, column=3, sticky=tk.W, padx=5)
+        ctk.CTkLabel(config_frame, text=_("end_year")).grid(row=3, column=2, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkEntry(config_frame, textvariable=self.year_latest_var, width=120).grid(row=3, column=3, sticky=tk.W, padx=5)
 
-        ttk.Label(config_frame, text="目标数量 (Target Count):").grid(row=3, column=0, sticky=tk.W, pady=2)
-        ttk.Entry(config_frame, textvariable=self.number_var, width=14).grid(row=3, column=1, sticky=tk.W, padx=5)
+        ctk.CTkLabel(config_frame, text=_("target_count")).grid(row=4, column=0, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkEntry(config_frame, textvariable=self.number_var, width=120).grid(row=4, column=1, sticky=tk.W, padx=5)
 
-        ttk.Label(config_frame, text="最大体积 (Max Size MB):").grid(row=3, column=2, sticky=tk.W, pady=2)
-        ttk.Entry(config_frame, textvariable=self.max_size_var, width=14).grid(row=3, column=3, sticky=tk.W, padx=5)
+        ctk.CTkLabel(config_frame, text=_("max_size_mb")).grid(row=4, column=2, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkEntry(config_frame, textvariable=self.max_size_var, width=120).grid(row=4, column=3, sticky=tk.W, padx=5)
 
-        ttk.Label(config_frame, text="请求间隔(s) (Req Interval):").grid(row=4, column=0, sticky=tk.W, pady=2)
-        ttk.Entry(config_frame, textvariable=self.request_interval_var, width=14).grid(row=4, column=1, sticky=tk.W, padx=5)
+        ctk.CTkLabel(config_frame, text=_("req_interval")).grid(row=5, column=0, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkEntry(config_frame, textvariable=self.request_interval_var, width=120).grid(row=5, column=1, sticky=tk.W, padx=5)
 
-        ttk.Label(config_frame, text="保存路径 (Save Path):").grid(row=5, column=0, sticky=tk.W, pady=2)
-        ttk.Entry(config_frame, textvariable=self.save_path_var, width=50).grid(row=5, column=1, columnspan=2, sticky=tk.W, padx=5)
-        ttk.Button(config_frame, text="浏览 (Browse)", command=self.browse_save_path).grid(row=5, column=3, sticky=tk.W, padx=5)
+        ctk.CTkLabel(config_frame, text=_("save_path")).grid(row=6, column=0, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkEntry(config_frame, textvariable=self.save_path_var, width=300).grid(row=6, column=1, columnspan=2, sticky=tk.W, padx=5)
+        ctk.CTkButton(config_frame, text=_("browse"), command=self.browse_save_path, width=80).grid(row=6, column=3, sticky=tk.W, padx=5)
 
-        # --- 2. 过滤选项区 ---
-        filter_frame = ttk.LabelFrame(self.parent, text="高级过滤选项 (Advanced Filters)", padding=10)
-        filter_frame.pack(fill=tk.X, padx=10, pady=5)
+        filter_frame = ctk.CTkFrame(self.scrollable_frame)
+        filter_frame.pack(fill=tk.X, padx=5, pady=5)
+        ctk.CTkLabel(filter_frame, text=_("advanced_filters"), font=("", 16, "bold")).grid(row=0, column=0, columnspan=4, sticky=tk.W, pady=5, padx=5)
         
-        ttk.Checkbutton(filter_frame, text="仅限 Bandcamp (NYP Only)", variable=self.bandcamp_var).grid(row=0, column=0, sticky=tk.W, padx=5)
-        ttk.Checkbutton(filter_frame, text="忽略 Lossy 批准 (Ignore Lossy)", variable=self.ignore_lossy_var).grid(row=0, column=1, sticky=tk.W, padx=5)
-        ttk.Checkbutton(filter_frame, text="忽略包含 16bit 的组 (Ignore 16bit)", variable=self.ignore_16bit_var).grid(row=0, column=2, sticky=tk.W, padx=5)
-        ttk.Checkbutton(filter_frame, text="忽略 Trumpable (Ignore Trumpable)", variable=self.ignore_trumpable_var).grid(row=0, column=3, sticky=tk.W, padx=5)
-        ttk.Checkbutton(filter_frame, text="排除 0 完成数(Snatched) (Excl 0 Snatches)", variable=self.exclude_zero_snatches_var).grid(row=1, column=0, sticky=tk.W, padx=5)
-        ttk.Checkbutton(filter_frame, text="自动下载种子 (Auto DL Torrent)", variable=self.auto_download_var).grid(row=1, column=1, sticky=tk.W, padx=5)
+        ctk.CTkCheckBox(filter_frame, text=_("nyp_only"), variable=self.bandcamp_var).grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
+        ctk.CTkCheckBox(filter_frame, text=_("ignore_lossy"), variable=self.ignore_lossy_var).grid(row=1, column=1, sticky=tk.W, padx=5, pady=5)
+        ctk.CTkCheckBox(filter_frame, text=_("ignore_16bit"), variable=self.ignore_16bit_var).grid(row=1, column=2, sticky=tk.W, padx=5, pady=5)
+        ctk.CTkCheckBox(filter_frame, text=_("ignore_trumpable"), variable=self.ignore_trumpable_var).grid(row=1, column=3, sticky=tk.W, padx=5, pady=5)
+        ctk.CTkCheckBox(filter_frame, text=_("excl_0_snatches"), variable=self.exclude_zero_snatches_var).grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+        ctk.CTkCheckBox(filter_frame, text=_("auto_dl_torrent"), variable=self.auto_download_var).grid(row=2, column=1, sticky=tk.W, padx=5, pady=5)
 
-        ttk.Label(filter_frame, text="保护 Buffer(GB):").grid(row=2, column=0, sticky=tk.W, pady=2)
-        buf_frame = ttk.Frame(filter_frame)
-        buf_frame.grid(row=2, column=0, sticky=tk.E, padx=5)
-        ttk.Entry(buf_frame, textvariable=self.buffer_limit_var, width=6).pack(side=tk.LEFT)
-        ttk.Label(buf_frame, text="公式:").pack(side=tk.LEFT, padx=(5,0))
-        ttk.Entry(buf_frame, textvariable=self.buffer_formula_var, width=12).pack(side=tk.LEFT)
+        ctk.CTkLabel(filter_frame, text=_("buffer_limit_gb")).grid(row=3, column=0, sticky=tk.W, pady=5, padx=5)
+        buf_frame = ctk.CTkFrame(filter_frame, fg_color="transparent")
+        buf_frame.grid(row=3, column=0, columnspan=2, sticky=tk.E, padx=5)
+        ctk.CTkEntry(buf_frame, textvariable=self.buffer_limit_var, width=60).pack(side=tk.LEFT)
+        ctk.CTkLabel(buf_frame, text=_("formula")).pack(side=tk.LEFT, padx=(10,5))
+        ctk.CTkEntry(buf_frame, textvariable=self.buffer_formula_var, width=120).pack(side=tk.LEFT)
 
-        ttk.Checkbutton(filter_frame, text="自动使用 FL Token", variable=self.use_fl_token_var).grid(row=2, column=1, sticky=tk.W, padx=5)
-        ttk.Label(filter_frame, text="Token 大小阈值(MB):").grid(row=2, column=2, sticky=tk.W, pady=2)
-        ttk.Entry(filter_frame, textvariable=self.fl_token_threshold_var, width=10).grid(row=2, column=2, sticky=tk.E, padx=5)
+        ctk.CTkCheckBox(filter_frame, text=_("auto_use_fl_token"), variable=self.use_fl_token_var).grid(row=3, column=2, sticky=tk.W, padx=5)
+        ctk.CTkLabel(filter_frame, text=_("token_threshold_mb")).grid(row=3, column=3, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkEntry(filter_frame, textvariable=self.fl_token_threshold_var, width=80).grid(row=3, column=3, sticky=tk.E, padx=5)
 
-        # 新增发行类型区
-        type_frame = ttk.LabelFrame(self.parent, text="发行类型筛选 (Release Type)", padding=10)
-        type_frame.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Checkbutton(type_frame, text="Album (专辑)", variable=self.album_var).grid(row=0, column=0, sticky=tk.W, padx=15)
-        ttk.Checkbutton(type_frame, text="EP", variable=self.ep_var).grid(row=0, column=1, sticky=tk.W, padx=15)
-        ttk.Checkbutton(type_frame, text="Single (单曲)", variable=self.single_var).grid(row=0, column=2, sticky=tk.W, padx=15)
+        type_frame = ctk.CTkFrame(self.scrollable_frame)
+        type_frame.pack(fill=tk.X, padx=5, pady=5)
+        ctk.CTkLabel(type_frame, text=_("release_type"), font=("", 16, "bold")).grid(row=0, column=0, columnspan=3, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkCheckBox(type_frame, text=_("album"), variable=self.album_var).grid(row=1, column=0, sticky=tk.W, padx=15, pady=5)
+        ctk.CTkCheckBox(type_frame, text=_("ep"), variable=self.ep_var).grid(row=1, column=1, sticky=tk.W, padx=15, pady=5)
+        ctk.CTkCheckBox(type_frame, text=_("single"), variable=self.single_var).grid(row=1, column=2, sticky=tk.W, padx=15, pady=5)
 
-        # --- 2.5 自动化工作流与 qBittorrent ---
-        pipeline_frame = ttk.LabelFrame(self.parent, text="自动化工作流 (Auto Pipeline & qBittorrent)", padding=10)
-        pipeline_frame.pack(fill=tk.X, padx=10, pady=5)
+        pipeline_frame = ctk.CTkFrame(self.scrollable_frame)
+        pipeline_frame.pack(fill=tk.X, padx=5, pady=5)
+        ctk.CTkLabel(pipeline_frame, text=_("auto_pipeline"), font=("", 16, "bold")).grid(row=0, column=0, columnspan=4, sticky=tk.W, pady=5, padx=5)
         
-        ttk.Checkbutton(pipeline_frame, text="启用完整流水线 (下载->降频->检查->尝试上传)", variable=self.enable_pipeline_var).grid(row=0, column=0, columnspan=4, sticky=tk.W, pady=5)
+        ctk.CTkCheckBox(pipeline_frame, text=_("enable_pipeline"), variable=self.enable_pipeline_var).grid(row=1, column=0, columnspan=4, sticky=tk.W, pady=5, padx=5)
         
-        ttk.Label(pipeline_frame, text="qB Host:").grid(row=1, column=0, sticky=tk.W, pady=2)
-        ttk.Entry(pipeline_frame, textvariable=self.qb_host_var, width=20).grid(row=1, column=1, sticky=tk.W, padx=5)
+        ctk.CTkLabel(pipeline_frame, text=_("qb_host")).grid(row=2, column=0, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkEntry(pipeline_frame, textvariable=self.qb_host_var, width=200).grid(row=2, column=1, sticky=tk.W, padx=5)
         
-        ttk.Label(pipeline_frame, text="qB Port:").grid(row=1, column=2, sticky=tk.W, pady=2)
-        ttk.Entry(pipeline_frame, textvariable=self.qb_port_var, width=10).grid(row=1, column=3, sticky=tk.W, padx=5)
+        ctk.CTkLabel(pipeline_frame, text=_("qb_port")).grid(row=2, column=2, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkEntry(pipeline_frame, textvariable=self.qb_port_var, width=100).grid(row=2, column=3, sticky=tk.W, padx=5)
         
-        ttk.Label(pipeline_frame, text="qB User:").grid(row=2, column=0, sticky=tk.W, pady=2)
-        ttk.Entry(pipeline_frame, textvariable=self.qb_user_var, width=20).grid(row=2, column=1, sticky=tk.W, padx=5)
+        ctk.CTkLabel(pipeline_frame, text=_("qb_user")).grid(row=3, column=0, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkEntry(pipeline_frame, textvariable=self.qb_user_var, width=200).grid(row=3, column=1, sticky=tk.W, padx=5)
         
-        ttk.Label(pipeline_frame, text="qB Pass:").grid(row=2, column=2, sticky=tk.W, pady=2)
-        ttk.Entry(pipeline_frame, textvariable=self.qb_pass_var, width=20, show="*").grid(row=2, column=3, sticky=tk.W, padx=5)
+        ctk.CTkLabel(pipeline_frame, text=_("qb_pass")).grid(row=3, column=2, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkEntry(pipeline_frame, textvariable=self.qb_pass_var, width=200, show="*").grid(row=3, column=3, sticky=tk.W, padx=5)
 
-        # --- 3. 按钮区 ---
-        btn_frame = ttk.Frame(self.parent)
-        btn_frame.pack(fill=tk.X, padx=10, pady=5)
+        btn_frame = ctk.CTkFrame(self.scrollable_frame, fg_color="transparent")
+        btn_frame.pack(fill=tk.X, padx=5, pady=10)
         
-        self.start_btn = ttk.Button(btn_frame, text="▶ 开始搜索 (Start Search)", command=self.start_search)
+        self.start_btn = ctk.CTkButton(btn_frame, text=_("start_search"), command=self.start_search, fg_color="#28a745", hover_color="#218838")
         self.start_btn.pack(side=tk.LEFT, padx=5)
         
-        self.stop_btn = ttk.Button(btn_frame, text="⏹ 停止搜索 (Stop Search)", command=self.stop_search, state=tk.DISABLED)
+        self.stop_btn = ctk.CTkButton(btn_frame, text=_("stop_search"), command=self.stop_search, fg_color="#dc3545", hover_color="#c82333", state=tk.DISABLED)
         self.stop_btn.pack(side=tk.LEFT, padx=5)
 
-        # --- 4. 日志区 ---
-        log_frame = ttk.LabelFrame(self.parent, text="运行日志 (Run Logs)", padding=10)
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        log_frame = ctk.CTkFrame(self.scrollable_frame)
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        ctk.CTkLabel(log_frame, text=_("run_logs"), font=("", 16, "bold")).pack(anchor=tk.W, padx=5, pady=5)
         
-        self.log_text = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, state=tk.NORMAL, bg="#1e1e1e", fg="#d4d4d4")
-        self.log_text.pack(fill=tk.BOTH, expand=True)
+        self.log_text = ctk.CTkTextbox(log_frame, wrap=tk.WORD)
+        self.log_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         sys.stdout = RedirectText(self.log_text)
 
@@ -736,8 +734,8 @@ class AppGUI:
         self.save_config()
 
         self.is_running = True
-        self.start_btn.config(state=tk.DISABLED)
-        self.stop_btn.config(state=tk.NORMAL)
+        self.start_btn.configure(state=tk.DISABLED)
+        self.stop_btn.configure(state=tk.NORMAL)
         self.log_text.delete(1.0, tk.END)
         print(">>> 正在启动后台搜索线程，请稍候...\n")
 
@@ -746,13 +744,12 @@ class AppGUI:
     def stop_search(self):
         self.is_running = False
         print("\n>>> 正在发送停止信号，等待当前请求完成...\n")
-        self.stop_btn.config(state=tk.DISABLED)
+        self.stop_btn.configure(state=tk.DISABLED)
 
     def run_thread(self):
         try:
             options = self.get_options()
             
-            # 初始化 PipelineManager
             pipeline = None
             if options.enable_pipeline:
                 try:
@@ -762,7 +759,6 @@ class AppGUI:
                         None, options, log_callback=print
                     )
                     pipeline.start()
-                    # 挂载到 options 上供 perform_search 使用
                     options.pipeline = pipeline
                 except Exception as e:
                     print(f"初始化流水线失败: {e}")
@@ -777,21 +773,14 @@ class AppGUI:
             print(f"\n❌ [系统错误]: 发生未捕获的异常 - {str(e)}")
         finally:
             self.is_running = False
-            self.parent.after(0, self._reset_buttons)
+            try:
+                self.parent.after(0, self._reset_buttons)
+            except:
+                pass
 
     def _reset_buttons(self):
-        self.start_btn.config(state=tk.NORMAL)
-        self.stop_btn.config(state=tk.DISABLED)
+        self.start_btn.configure(state=tk.NORMAL)
+        self.stop_btn.configure(state=tk.DISABLED)
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    
-    # 启用高 DPI 支持，让字体在 4K 屏幕上不模糊
-    try:
-        from ctypes import windll
-        windll.shcore.SetProcessDpiAwareness(1)
-    except:
-        pass
-        
-    app = AppGUI(root)
-    root.mainloop()
+    pass
