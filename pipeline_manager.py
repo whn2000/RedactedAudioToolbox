@@ -9,6 +9,13 @@ from flac_downsampler import process_album as flac_downsample_album
 from lossless_checker import process_album as check_lossless_album
 import traceback
 
+_DEFAULT_SITE_CONFIG = {
+    "api_url": "https://redacted.sh/ajax.php",
+    "base_url": "https://redacted.sh",
+    "tracker_url": "https://flacsfor.me/announce",
+    "source": "RED",
+}
+
 class PipelineManager:
     def __init__(self, qb_host, qb_port, qb_user, qb_pass, red_session, red_options, log_main=print, log_process=print, log_check=print, ask_manual_check=None):
         self.qb = QbittorrentClient(qb_host, qb_port, qb_user, qb_pass)
@@ -93,6 +100,9 @@ class PipelineManager:
 
     def _process_downloaded_torrent(self, save_path, name, qb_torrent_info):
         try:
+            site_config = getattr(self.red_options, 'site_config', _DEFAULT_SITE_CONFIG)
+            base_url = site_config["base_url"]
+            api_url = site_config["api_url"]
             album_dir = Path(save_path) / name
             if not album_dir.exists() or not album_dir.is_dir():
                 self.log_process(f"    [Pipeline] ❌ 找不到下载的文件夹: {album_dir}")
@@ -109,9 +119,10 @@ class PipelineManager:
             # 1. 降频
             # flac_downsampler 的 process_album 其实处理的是单张专辑目录
             # 我们需要获取 group_info, 这个目前没有传给 qb，我们可以通过解析目录里的 metadata 或直接盲转
-            tracker_url = "https://flacsfor.me/announce" # 默认 RED tracker
+            tracker_url = site_config.get("tracker_url", "https://flacsfor.me/announce")
+            source_flag = site_config.get("source", "RED")
             # 实际的 process_album 会搜索 flac，并生成 16bit 目录
-            flac_downsample_album(album_dir, tracker_url, "RED") 
+            flac_downsample_album(album_dir, tracker_url, source_flag) 
             
             # 找到生成的 16bit 目录
             output_dir = album_dir.parent / f"{album_dir.name} (16bit)"
@@ -169,7 +180,7 @@ class PipelineManager:
             torrent_id = torrent_info.get('torrentId', torrent_info.get('id'))
             
             # 构造原始 24bit 的链接
-            source_link = f"https://redacted.sh/torrents.php?id={group_id}&torrentid={torrent_id}"
+            source_link = f"{base_url}/torrents.php?id={group_id}&torrentid={torrent_id}"
             release_desc = f"16-bit downsample created from the 24-bit source.\n\n[url={source_link}]24-bit source[/url]"
             
             upload_data = {
@@ -190,12 +201,29 @@ class PipelineManager:
                     full_torrent_info = t
                     break
 
-            if full_torrent_info.get('remastered'):
+            is_remastered = (
+                full_torrent_info.get('remastered') is True or 
+                (full_torrent_info.get('remasterYear') not in (None, 0, '')) or
+                bool(full_torrent_info.get('remasterTitle')) or 
+                bool(full_torrent_info.get('remasterRecordLabel')) or 
+                bool(full_torrent_info.get('remasterCatalogueNumber'))
+            )
+
+            if is_remastered:
                 upload_data['remaster'] = 'true'
-                upload_data['remaster_year'] = str(full_torrent_info.get('remasterYear') or '')
+                
+                r_year = full_torrent_info.get('remasterYear')
+                if not r_year:
+                    r_year = group_info['response']['group'].get('year', '')
+                upload_data['remaster_year'] = str(r_year)
+                
                 upload_data['remaster_title'] = str(full_torrent_info.get('remasterTitle') or '')
-                upload_data['remaster_record_label'] = str(full_torrent_info.get('remasterRecordLabel') or '')
-                upload_data['remaster_catalogue_number'] = str(full_torrent_info.get('remasterCatalogueNumber') or '')
+                
+                r_label = full_torrent_info.get('remasterRecordLabel') or group_info['response']['group'].get('recordLabel', '')
+                r_cat = full_torrent_info.get('remasterCatalogueNumber') or group_info['response']['group'].get('catalogueNumber', '')
+                
+                upload_data['remaster_record_label'] = str(r_label)
+                upload_data['remaster_catalogue_number'] = str(r_cat)
                 
             # 寻找生成的 torrent 文件
             generated_torrent = album_dir.parent / f"{output_dir.name}.torrent"
@@ -204,13 +232,17 @@ class PipelineManager:
                 return
                 
             # 执行上传
-            upload_url = "https://redacted.sh/ajax.php?action=upload"
+            upload_url = f"{api_url}?action=upload"
+            auth_key = self.red_options.api_key
+            if site_config.get("source") == "OPS" and not auth_key.startswith("token "):
+                auth_key = f"token {auth_key}"
+                
             headers = {
-                'Authorization': self.red_options.api_key,
+                'Authorization': auth_key,
                 'User-Agent': 'EliteTMHelper_AutoUpload'
             }
             
-            self.log_main(f"    [Pipeline] 🚀 正在向 RED 提交 POST 请求...")
+            self.log_main(f"    [Pipeline] 🚀 正在向 {site_config.get('source', 'RED')} 提交 POST 请求...")
             with open(generated_torrent, 'rb') as f:
                 files = {'file_input': (generated_torrent.name, f, 'application/x-bittorrent')}
                 # 注意：requests 在传递 dict 到 data 时，不要将 headers 设为 multipart/form-data，requests 会自动处理 boundary
@@ -220,14 +252,14 @@ class PipelineManager:
                 try:
                     resp_json = resp.json()
                     if resp_json.get('status') == 'success':
-                        new_torrent_id = resp_json['response']['torrentid']
-                        new_link = f"https://redacted.sh/torrents.php?id={group_id}&torrentid={new_torrent_id}"
+                        new_torrent_id = resp_json['response'].get('torrentid') or resp_json['response'].get('torrentId')
+                        new_link = f"{base_url}/torrents.php?id={group_id}&torrentid={new_torrent_id}"
                         self.log_main(f"    [Pipeline] 🎉 自动上传成功！")
                         self.log_main(f"    [Pipeline] 🔗 新种子链接: {new_link}")
                         
                         # 成功上传后，必须从 RED 下载打上了官方 tracker passkey 和 source 标记的新种子
-                        self.log_main(f"    [Pipeline] 📥 正在从 RED 下载官方种子文件以进行做种...")
-                        dl_url = f"https://redacted.sh/ajax.php?action=download&id={new_torrent_id}"
+                        self.log_main(f"    [Pipeline] 📥 正在从 {site_config.get('source', 'RED')} 下载官方种子文件以进行做种...")
+                        dl_url = f"{api_url}?action=download&id={new_torrent_id}"
                         dl_resp = requests.get(dl_url, headers=headers, timeout=30)
                         
                         if dl_resp.status_code == 200:

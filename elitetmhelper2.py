@@ -11,6 +11,27 @@ import threading
 from types import SimpleNamespace
 
 # ==========================================
+# 站点配置
+# ==========================================
+
+SITE_CONFIGS = {
+    "RED": {
+        "name": "RED (Redacted)",
+        "api_url": "https://redacted.sh/ajax.php",
+        "base_url": "https://redacted.sh",
+        "tracker_url": "https://flacsfor.me/announce",
+        "source": "RED",
+    },
+    "OPS": {
+        "name": "OPS (Orpheus)",
+        "api_url": "https://orpheus.network/ajax.php",
+        "base_url": "https://orpheus.network",
+        "tracker_url": "https://home.opsfet.ch/announce",
+        "source": "OPS",
+    }
+}
+
+# ==========================================
 # 核心业务逻辑 (基于原脚本优化)
 # ==========================================
 
@@ -59,7 +80,8 @@ class RedactedSession(requests.Session):
         return super().post(*args, **kwargs)
 
     def get_api(self, params):
-        return self.get("https://redacted.sh/ajax.php", params=params)
+        api_url = getattr(self.options, 'site_config', SITE_CONFIGS["RED"])["api_url"]
+        return self.get(api_url, params=params)
 
 class Cache:
     def __init__(self, options):
@@ -83,7 +105,7 @@ class Cache:
 
 def get_edition(torrent):
     return {
-        x: torrent[x] for x in [
+        x: torrent.get(x) for x in [
             "remastered",
             "remasterYear",
             "remasterTitle",
@@ -98,27 +120,35 @@ class FoundTorrent:
         self.torrent_id = torrent_id
         self.group_info = group_info
         self.torrents = self.group_info["response"]["torrents"]
-        self.bbBody = self.group_info["response"]["group"]["bbBody"]
+        self.bbBody = self.group_info["response"]["group"].get("bbBody", self.group_info["response"]["group"].get("wikiBody", ""))
         self.lossy_status = False
         self.trump_status = False
         self.edition = []
         self.seeders = 0
 
     def is_24_bit(self):
+        current_torrent = None
         for torrent in self.torrents:
-            if torrent["id"] == self.torrent_id:
+            if torrent.get("id") == self.torrent_id or torrent.get("torrentId") == self.torrent_id:
                 self.edition = get_edition(torrent)
-                if torrent['lossyWebApproved'] or torrent['lossyMasterApproved']:
+                if torrent.get('lossyWebApproved') or torrent.get('lossyMasterApproved'):
                     self.lossy_status = True
-                if torrent['trumpable']:
+                if torrent.get('trumpable'):
                     self.trump_status = True
-                self.seeders = torrent['seeders']
+                self.seeders = torrent.get('seeders', 0)
                 self.snatched = torrent.get('snatched', torrent.get('snatches', 0))
+                current_torrent = torrent
                 break
+                
+        if not current_torrent:
+            return False
+            
+        if current_torrent.get("format") != "FLAC" or current_torrent.get("encoding") != "24bit Lossless":
+            return False
 
         for torrent in self.torrents:
             if get_edition(torrent) == self.edition:
-                if torrent["encoding"] == "Lossless":
+                if torrent.get("encoding") == "Lossless":
                     return False
         return True
 
@@ -139,15 +169,15 @@ class FoundTorrent:
     def uns(self):
         result = False
         for torrent in self.torrents:
-            if torrent['remastered'] is True and torrent['remasterYear'] == 0 and torrent['encoding'] == "Lossless":
+            if torrent.get('remastered') is True and torrent.get('remasterYear') in (0, None) and torrent.get('encoding') == "Lossless":
                 result = True
-            if torrent['remastered'] is False and torrent['remasterYear'] == 0 and torrent['encoding'] == "Lossless":
+            if torrent.get('remastered') is False and torrent.get('remasterYear') in (0, None) and torrent.get('encoding') == "Lossless":
                 result = True
         return result
 
     def any_16_bit(self):
         for torrent in self.torrents:
-            if torrent["encoding"] == "Lossless":
+            if torrent.get("encoding") == "Lossless":
                 return True
         return False
 
@@ -205,7 +235,7 @@ def search_result_iterator(session, options, found, abort_flag):
                 raise RedactedAPIError("无效的登录凭证或 Cookie 过期")
 
             if first_page.get("status") != "success":
-                # API 返回状态不成功
+                print(f"API 返回异常，跳过... 错误信息: {first_page.get('error', first_page)}")
                 break
                 
             if not first_page["response"]["results"]:
@@ -286,7 +316,7 @@ def search_result_iterator(session, options, found, abort_flag):
                     break
 
                 if page.get("status") != "success":
-                    print("API 返回异常，终止当前关键词搜索。")
+                    print(f"API 返回异常，终止当前关键词搜索。错误信息: {page.get('error', page)}")
                     break
 
                 if not page["response"]["results"]:
@@ -323,6 +353,9 @@ def search_result_iterator(session, options, found, abort_flag):
 
 def perform_search(options, abort_flag):
     found = 0
+    site_config = getattr(options, 'site_config', SITE_CONFIGS["RED"])
+    base_url = site_config["base_url"]
+    api_url = site_config["api_url"]
     if not options.api_key:
         print("请提供 API key!")
         return
@@ -334,8 +367,14 @@ def perform_search(options, abort_flag):
         'User-Agent': 'EliteTMHelper_GUI',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Encoding': 'gzip,deflate,sdch',
-        'Accept-Language': 'en-US,en;q=0.8',
-        'Authorization': f'{options.api_key}'}
+        'Accept-Language': 'en-US,en;q=0.8'
+    }
+    
+    auth_key = options.api_key
+    if site_config.get("source") == "OPS" and not auth_key.startswith("token "):
+        auth_key = f"token {auth_key}"
+        
+    headers['Authorization'] = auth_key
     session.headers.update(headers)
 
     # 获取用户状态以计算 Buffer
@@ -377,6 +416,9 @@ def perform_search(options, abort_flag):
         group_search_params = {"action": "torrentgroup", "id": group["groupId"]}
         try:
             group_info = session.get_api(group_search_params).json()
+            if group_info.get("status") != "success" or not isinstance(group_info.get("response"), dict):
+                print(f"获取组信息格式异常或请求失败 groupId={group['groupId']}，跳过。")
+                continue
         except Exception as e:
             print(f"获取组信息失败 groupId={group['groupId']}: {str(e)}")
             continue
@@ -402,15 +444,15 @@ def perform_search(options, abort_flag):
                         html_start = html_mid = html_end = html_found = ""
                         if options.html:
                             html_start = '<a href="'
-                            html_mid = '">https://redacted.sh/torrents.php?id=' + str(group['groupId']) + '&torrentid=' + str(torrent['torrentId']) + '</a>'
+                            html_mid = f'">{base_url}/torrents.php?id={group["groupId"]}&torrentid={torrent["torrentId"]}</a>'
                             html_end = '</br>'
                             html_found = str(found) + " "
-                        myfile.write(f"{html_found}{html_start}https://redacted.sh/torrents.php?id={group['groupId']}&torrentid={torrent['torrentId']}{html_mid}")
+                        myfile.write(f"{html_found}{html_start}{base_url}/torrents.php?id={group['groupId']}&torrentid={torrent['torrentId']}{html_mid}")
                         if options.show_size:
                             myfile.write(f" {round(torrent['size']/1048576, 2)}MB")
                         myfile.write(f"{html_end}\n")
                         
-                    print(f"torrent<{torrent['torrentId']: >7}> : 发现目标! https://redacted.sh/torrents.php?id={group['groupId']}&torrentid={torrent['torrentId']}", end="")
+                    print(f"torrent<{torrent['torrentId']: >7}> : 发现目标! {base_url}/torrents.php?id={group['groupId']}&torrentid={torrent['torrentId']}", end="")
                     if options.show_size: print(f" {round(torrent['size']/1048576, 2)}MB", end="")
                     
                     if options.auto_download:
@@ -424,7 +466,7 @@ def perform_search(options, abort_flag):
                             current_buffer_gb -= (size_mb / 1024) # 扣除预计下载量
 
                         try:
-                            dl_url = f"https://redacted.sh/ajax.php?action=download&id={torrent['torrentId']}"
+                            dl_url = f"{api_url}?action=download&id={torrent['torrentId']}"
                             used_token = False
                             if options.use_fl_token and size_mb >= options.fl_token_threshold:
                                 dl_url += "&usetoken=1"
@@ -452,7 +494,7 @@ def perform_search(options, abort_flag):
                                     json.dump({
                                         'group_info': group_info,
                                         'torrent_info': torrent,
-                                        'tracker_url': 'https://flacsfor.me/announce'
+                                        'tracker_url': site_config['tracker_url']
                                     }, f)
                                 
                                 # 推送到 qBittorrent
@@ -514,7 +556,13 @@ class AppGUI:
         self.parent = parent
         self.is_running = False
         
+        self.site_configs_data = {"RED": {}, "OPS": {}}
+        self._is_switching_site = False
+        
+        self.site_var = tk.StringVar(value="RED")
         self.api_key_var = tk.StringVar()
+        
+        self.site_var.trace_add("write", self.on_site_changed)
         self.save_path_var = tk.StringVar()
         self.media_var = tk.StringVar(value="CD")
         self.year_latest_var = tk.StringVar(value="2023")
@@ -544,6 +592,7 @@ class AppGUI:
         self.dj_mix_var = tk.BooleanVar(value=True)
         self.exclude_zero_snatches_var = tk.BooleanVar(value=False)
         self.auto_download_var = tk.BooleanVar(value=False)
+        self.min_seeders_var = tk.StringVar(value="0")
         
         self.buffer_limit_var = tk.StringVar(value="10.0")
         self.buffer_formula_var = tk.StringVar(value="(U / 0.65) - D")
@@ -559,108 +608,174 @@ class AppGUI:
         self.request_interval_var = tk.StringVar(value="3.0")
 
         self.config_file = "config.json"
+        self.last_site = self.site_var.get()
         self.load_config()
 
         self.build_ui()
+
+    def on_site_changed(self, *args):
+        if self._is_switching_site: return
+        self._is_switching_site = True
+        
+        new_site = self.site_var.get()
+        if self.last_site != new_site:
+            self.site_configs_data[self.last_site] = self.get_current_site_settings()
+            self.apply_site_settings(self.site_configs_data.get(new_site, {}))
+            self.last_site = new_site
+            
+        self._is_switching_site = False
+
+    def get_current_site_settings(self):
+        return {
+            'api_key': self.api_key_var.get(),
+            'save_path': self.save_path_var.get(),
+            'buffer_formula': self.buffer_formula_var.get(),
+            'media': self.media_var.get(),
+            'year_latest': self.year_latest_var.get(),
+            'year_earliest': self.year_earliest_var.get(),
+            'number': self.number_var.get(),
+            'max_size': self.max_size_var.get(),
+            'order_by': self.order_by_var.get(),
+            'bandcamp': self.bandcamp_var.get(),
+            'ignore_lossy': self.ignore_lossy_var.get(),
+            'ignore_16bit': self.ignore_16bit_var.get(),
+            'ignore_trumpable': self.ignore_trumpable_var.get(),
+            'album': self.album_var.get(),
+            'soundtrack': self.soundtrack_var.get(),
+            'ep': self.ep_var.get(),
+            'anthology': self.anthology_var.get(),
+            'compilation': self.compilation_var.get(),
+            'single': self.single_var.get(),
+            'live_album': self.live_album_var.get(),
+            'remix': self.remix_var.get(),
+            'bootleg': self.bootleg_var.get(),
+            'interview': self.interview_var.get(),
+            'mixtape': self.mixtape_var.get(),
+            'demo': self.demo_var.get(),
+            'unknown': self.unknown_var.get(),
+            'concert_recording': self.concert_recording_var.get(),
+            'dj_mix': self.dj_mix_var.get(),
+            'exclude_zero_snatches': self.exclude_zero_snatches_var.get(),
+            'auto_download': self.auto_download_var.get(),
+            'min_seeders': self.min_seeders_var.get(),
+            'buffer_limit': self.buffer_limit_var.get(),
+            'use_fl_token': self.use_fl_token_var.get(),
+            'fl_token_threshold': self.fl_token_threshold_var.get(),
+            'request_interval': self.request_interval_var.get(),
+        }
+
+    def apply_site_settings(self, config):
+        if not config: return
+        
+        if 'api_key' in config: self.api_key_var.set(config['api_key'])
+        if 'save_path' in config: self.save_path_var.set(config['save_path'])
+        if 'buffer_formula' in config: self.buffer_formula_var.set(config['buffer_formula'])
+        if 'media' in config: self.media_var.set(config['media'])
+        if 'year_latest' in config: self.year_latest_var.set(config['year_latest'])
+        if 'year_earliest' in config: self.year_earliest_var.set(config['year_earliest'])
+        if 'number' in config: self.number_var.set(config['number'])
+        if 'max_size' in config: self.max_size_var.set(config['max_size'])
+        if 'order_by' in config: self.order_by_var.set(config['order_by'])
+        if 'bandcamp' in config: self.bandcamp_var.set(config['bandcamp'])
+        if 'ignore_lossy' in config: self.ignore_lossy_var.set(config['ignore_lossy'])
+        if 'ignore_16bit' in config: self.ignore_16bit_var.set(config['ignore_16bit'])
+        if 'ignore_trumpable' in config: self.ignore_trumpable_var.set(config['ignore_trumpable'])
+        if 'album' in config: self.album_var.set(config['album'])
+        if 'soundtrack' in config: self.soundtrack_var.set(config['soundtrack'])
+        if 'ep' in config: self.ep_var.set(config['ep'])
+        if 'anthology' in config: self.anthology_var.set(config['anthology'])
+        if 'compilation' in config: self.compilation_var.set(config['compilation'])
+        if 'single' in config: self.single_var.set(config['single'])
+        if 'live_album' in config: self.live_album_var.set(config['live_album'])
+        if 'remix' in config: self.remix_var.set(config['remix'])
+        if 'bootleg' in config: self.bootleg_var.set(config['bootleg'])
+        if 'interview' in config: self.interview_var.set(config['interview'])
+        if 'mixtape' in config: self.mixtape_var.set(config['mixtape'])
+        if 'demo' in config: self.demo_var.set(config['demo'])
+        if 'unknown' in config: self.unknown_var.set(config['unknown'])
+        if 'concert_recording' in config: self.concert_recording_var.set(config['concert_recording'])
+        if 'dj_mix' in config: self.dj_mix_var.set(config['dj_mix'])
+        if 'exclude_zero_snatches' in config: self.exclude_zero_snatches_var.set(config['exclude_zero_snatches'])
+        if 'auto_download' in config: self.auto_download_var.set(config['auto_download'])
+        if 'min_seeders' in config: self.min_seeders_var.set(str(config['min_seeders']))
+        if 'buffer_limit' in config: self.buffer_limit_var.set(config['buffer_limit'])
+        if 'use_fl_token' in config: self.use_fl_token_var.set(config['use_fl_token'])
+        if 'fl_token_threshold' in config: self.fl_token_threshold_var.set(config['fl_token_threshold'])
+        if 'request_interval' in config: self.request_interval_var.set(config['request_interval'])
 
     def load_config(self):
         try:
             if Path(self.config_file).exists():
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     config = json.load(f)
-                    if 'api_key' in config: self.api_key_var.set(config['api_key'])
-                    if 'save_path' in config: self.save_path_var.set(config['save_path'])
-                    if 'buffer_formula' in config: self.buffer_formula_var.set(config['buffer_formula'])
-                    if 'qb_host' in config: self.qb_host_var.set(config['qb_host'])
-                    if 'qb_port' in config: self.qb_port_var.set(config['qb_port'])
-                    if 'qb_user' in config: self.qb_user_var.set(config['qb_user'])
-                    if 'qb_pass' in config: self.qb_pass_var.set(config['qb_pass'])
-                    if 'enable_pipeline' in config: self.enable_pipeline_var.set(config['enable_pipeline'])
                     
-                    if 'media' in config: self.media_var.set(config['media'])
-                    if 'year_latest' in config: self.year_latest_var.set(config['year_latest'])
-                    if 'year_earliest' in config: self.year_earliest_var.set(config['year_earliest'])
-                    if 'number' in config: self.number_var.set(config['number'])
-                    if 'max_size' in config: self.max_size_var.set(config['max_size'])
-                    if 'order_by' in config: self.order_by_var.set(config['order_by'])
-                    
-                    if 'bandcamp' in config: self.bandcamp_var.set(config['bandcamp'])
-                    if 'ignore_lossy' in config: self.ignore_lossy_var.set(config['ignore_lossy'])
-                    if 'ignore_16bit' in config: self.ignore_16bit_var.set(config['ignore_16bit'])
-                    if 'ignore_trumpable' in config: self.ignore_trumpable_var.set(config['ignore_trumpable'])
-                    if 'album' in config: self.album_var.set(config['album'])
-                    if 'soundtrack' in config: self.soundtrack_var.set(config['soundtrack'])
-                    if 'ep' in config: self.ep_var.set(config['ep'])
-                    if 'anthology' in config: self.anthology_var.set(config['anthology'])
-                    if 'compilation' in config: self.compilation_var.set(config['compilation'])
-                    if 'single' in config: self.single_var.set(config['single'])
-                    if 'live_album' in config: self.live_album_var.set(config['live_album'])
-                    if 'remix' in config: self.remix_var.set(config['remix'])
-                    if 'bootleg' in config: self.bootleg_var.set(config['bootleg'])
-                    if 'interview' in config: self.interview_var.set(config['interview'])
-                    if 'mixtape' in config: self.mixtape_var.set(config['mixtape'])
-                    if 'demo' in config: self.demo_var.set(config['demo'])
-                    if 'unknown' in config: self.unknown_var.set(config['unknown'])
-                    if 'concert_recording' in config: self.concert_recording_var.set(config['concert_recording'])
-                    if 'dj_mix' in config: self.dj_mix_var.set(config['dj_mix'])
-                    if 'exclude_zero_snatches' in config: self.exclude_zero_snatches_var.set(config['exclude_zero_snatches'])
-                    if 'auto_download' in config: self.auto_download_var.set(config['auto_download'])
-                    
-                    if 'buffer_limit' in config: self.buffer_limit_var.set(config['buffer_limit'])
-                    if 'use_fl_token' in config: self.use_fl_token_var.set(config['use_fl_token'])
-                    if 'fl_token_threshold' in config: self.fl_token_threshold_var.set(config['fl_token_threshold'])
-                    if 'request_interval' in config: self.request_interval_var.set(config['request_interval'])
+                    if "sites" in config:
+                        # 新版配置
+                        self.site_configs_data = config.get("sites", {"RED": {}, "OPS": {}})
+                        
+                        if 'site' in config: 
+                            self.site_var.set(config['site'])
+                        self.last_site = self.site_var.get()
+                        
+                        global_config = config.get("global", {})
+                        if 'qb_host' in global_config: self.qb_host_var.set(global_config['qb_host'])
+                        if 'qb_port' in global_config: self.qb_port_var.set(global_config['qb_port'])
+                        if 'qb_user' in global_config: self.qb_user_var.set(global_config['qb_user'])
+                        if 'qb_pass' in global_config: self.qb_pass_var.set(global_config['qb_pass'])
+                        if 'enable_pipeline' in global_config: self.enable_pipeline_var.set(global_config['enable_pipeline'])
+                        
+                        self.apply_site_settings(self.site_configs_data.get(self.last_site, {}))
+                        
+                    else:
+                        # 兼容旧版本：将现有的扁平配置分别克隆到两个站点中
+                        print("检测到旧版配置，正在迁移到新版分站配置结构...")
+                        if 'site' in config: self.site_var.set(config['site'])
+                        self.last_site = self.site_var.get()
+                        
+                        if 'qb_host' in config: self.qb_host_var.set(config['qb_host'])
+                        if 'qb_port' in config: self.qb_port_var.set(config['qb_port'])
+                        if 'qb_user' in config: self.qb_user_var.set(config['qb_user'])
+                        if 'qb_pass' in config: self.qb_pass_var.set(config['qb_pass'])
+                        if 'enable_pipeline' in config: self.enable_pipeline_var.set(config['enable_pipeline'])
+                        
+                        migrated_site_config = config.copy()
+                        # 旧版的 API key
+                        old_api_keys = config.get('api_keys', {})
+                        if not old_api_keys and 'api_key' in config:
+                            old_api_keys = {"RED": config['api_key'], "OPS": config['api_key']}
+                            
+                        self.apply_site_settings(migrated_site_config)
+                        self.site_configs_data["RED"] = self.get_current_site_settings()
+                        self.site_configs_data["OPS"] = self.get_current_site_settings()
+                        
+                        # 恢复各自的 API KEY
+                        self.site_configs_data["RED"]["api_key"] = old_api_keys.get("RED", "")
+                        self.site_configs_data["OPS"]["api_key"] = old_api_keys.get("OPS", "")
+                        
+                        # 最后重新应用当前选择站点的配置
+                        self.apply_site_settings(self.site_configs_data.get(self.last_site, {}))
+                        
         except Exception as e:
             print(f"Failed to load config: {e}")
 
     def save_config(self):
         try:
+            current_site = self.site_var.get()
+            self.site_configs_data[current_site] = self.get_current_site_settings()
+            
             config = {
-                'api_key': self.api_key_var.get(),
-                'save_path': self.save_path_var.get(),
-                'buffer_formula': self.buffer_formula_var.get(),
-                'qb_host': self.qb_host_var.get(),
-                'qb_port': self.qb_port_var.get(),
-                'qb_user': self.qb_user_var.get(),
-                'qb_pass': self.qb_pass_var.get(),
-                'enable_pipeline': self.enable_pipeline_var.get(),
-                
-                'media': self.media_var.get(),
-                'year_latest': self.year_latest_var.get(),
-                'year_earliest': self.year_earliest_var.get(),
-                'number': self.number_var.get(),
-                'max_size': self.max_size_var.get(),
-                'order_by': self.order_by_var.get(),
-                
-                'bandcamp': self.bandcamp_var.get(),
-                'ignore_lossy': self.ignore_lossy_var.get(),
-                'ignore_16bit': self.ignore_16bit_var.get(),
-                'ignore_trumpable': self.ignore_trumpable_var.get(),
-                'album': self.album_var.get(),
-                'soundtrack': self.soundtrack_var.get(),
-                'ep': self.ep_var.get(),
-                'anthology': self.anthology_var.get(),
-                'compilation': self.compilation_var.get(),
-                'single': self.single_var.get(),
-                'live_album': self.live_album_var.get(),
-                'remix': self.remix_var.get(),
-                'bootleg': self.bootleg_var.get(),
-                'interview': self.interview_var.get(),
-                'mixtape': self.mixtape_var.get(),
-                'demo': self.demo_var.get(),
-                'unknown': self.unknown_var.get(),
-                'concert_recording': self.concert_recording_var.get(),
-                'dj_mix': self.dj_mix_var.get(),
-                'exclude_zero_snatches': self.exclude_zero_snatches_var.get(),
-                'auto_download': self.auto_download_var.get(),
-                
-                'buffer_limit': self.buffer_limit_var.get(),
-                'use_fl_token': self.use_fl_token_var.get(),
-                'fl_token_threshold': self.fl_token_threshold_var.get(),
-                'request_interval': self.request_interval_var.get()
+                'site': current_site,
+                'global': {
+                    'qb_host': self.qb_host_var.get(),
+                    'qb_port': self.qb_port_var.get(),
+                    'qb_user': self.qb_user_var.get(),
+                    'qb_pass': self.qb_pass_var.get(),
+                    'enable_pipeline': self.enable_pipeline_var.get(),
+                },
+                'sites': self.site_configs_data
             }
             with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(config, f, indent=4)
+                json.dump(config, f, indent=4, ensure_ascii=False)
         except Exception as e:
             print(f"Failed to save config: {e}")
 
@@ -672,8 +787,10 @@ class AppGUI:
         config_frame.pack(fill=tk.X, padx=5, pady=5)
         ctk.CTkLabel(config_frame, text=_("core_config"), font=("", 16, "bold")).grid(row=0, column=0, columnspan=4, sticky=tk.W, pady=5, padx=5)
 
-        ctk.CTkLabel(config_frame, text=_("api_key")).grid(row=1, column=0, sticky=tk.W, pady=5, padx=5)
-        ctk.CTkEntry(config_frame, textvariable=self.api_key_var, width=300, show="*").grid(row=1, column=1, columnspan=3, sticky=tk.W, padx=5)
+        ctk.CTkLabel(config_frame, text=_("site")).grid(row=1, column=0, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkComboBox(config_frame, variable=self.site_var, values=['RED', 'OPS'], width=100).grid(row=1, column=1, sticky=tk.W, padx=5)
+        ctk.CTkLabel(config_frame, text=_("api_key")).grid(row=1, column=2, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkEntry(config_frame, textvariable=self.api_key_var, width=200, show="*").grid(row=1, column=3, sticky=tk.W, padx=5)
 
         ctk.CTkLabel(config_frame, text=_("media")).grid(row=2, column=0, sticky=tk.W, pady=5, padx=5)
         ctk.CTkComboBox(config_frame, variable=self.media_var, values=['', 'CD', 'WEB', 'Vinyl', 'SACD', 'Cassette', 'Blu-Ray'], width=120).grid(row=2, column=1, sticky=tk.W, padx=5)
@@ -710,6 +827,11 @@ class AppGUI:
         ctk.CTkCheckBox(filter_frame, text=_("ignore_trumpable"), variable=self.ignore_trumpable_var).grid(row=1, column=3, sticky=tk.W, padx=5, pady=5)
         ctk.CTkCheckBox(filter_frame, text=_("excl_0_snatches"), variable=self.exclude_zero_snatches_var).grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
         ctk.CTkCheckBox(filter_frame, text=_("auto_dl_torrent"), variable=self.auto_download_var).grid(row=2, column=1, sticky=tk.W, padx=5, pady=5)
+
+        min_seeders_frame = ctk.CTkFrame(filter_frame, fg_color="transparent")
+        min_seeders_frame.grid(row=2, column=2, columnspan=2, sticky=tk.W, padx=5, pady=5)
+        ctk.CTkLabel(min_seeders_frame, text=_("min_seeders")).pack(side=tk.LEFT, padx=(0, 5))
+        ctk.CTkEntry(min_seeders_frame, textvariable=self.min_seeders_var, width=60).pack(side=tk.LEFT)
 
         ctk.CTkLabel(filter_frame, text=_("buffer_limit_gb")).grid(row=3, column=0, sticky=tk.W, pady=5, padx=5)
         buf_frame = ctk.CTkFrame(filter_frame, fg_color="transparent")
@@ -808,8 +930,9 @@ class AppGUI:
     def get_options(self):
         return SimpleNamespace(
             api_key=self.api_key_var.get().strip(),
+            site_config=SITE_CONFIGS.get(self.site_var.get(), SITE_CONFIGS["RED"]),
             bandcamp=self.bandcamp_var.get(),
-            cache='EliteTMHelper2_GUI.cache',
+            cache=f'EliteTMHelper2_{self.site_var.get()}.cache',
             dont_cache_yays=False,
             ignore_20_pages_limit=False,
             any16bit=self.ignore_16bit_var.get(),
@@ -818,10 +941,10 @@ class AppGUI:
             uns=False,
             max_size=self._safe_int(self.max_size_var, 2048) * 1048576,
             media=self.media_var.get() if self.media_var.get() else "",
-            min_seeders=1,
+            min_seeders=self._safe_int(self.min_seeders_var, 0),
             order_by=self.order_by_var.get(),
             order_way="desc",
-            output="EliteTMHelper2_Found.txt",
+            output=f'EliteTMHelper2_{self.site_var.get()}_Found.txt',
             output_args=False,
             html=False,
             find_number=self._safe_int(self.number_var, 50),
@@ -927,7 +1050,9 @@ class AppGUI:
         except RedactedAPIError as e:
             print(f"\n❌ [API 错误]: {str(e)}")
         except Exception as e:
-            print(f"\n❌ [系统错误]: 发生未捕获的异常 - {str(e)}")
+            import traceback
+            print(f"\n❌ [系统错误]: 发生未捕获的异常 - {str(e)}\n{traceback.format_exc()}")
+            self.stop_search()
         finally:
             self.is_running = False
             try:

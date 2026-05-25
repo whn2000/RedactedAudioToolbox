@@ -34,6 +34,7 @@ TRANSLATIONS = {
         "fit_screen": "自适应屏幕 (占全屏80%)",
         
         "core_config": "核心配置",
+        "site": "站点:",
         "api_key": "API Key:",
         "media": "媒介:",
         "order_by": "排序方式:",
@@ -51,6 +52,7 @@ TRANSLATIONS = {
         "ignore_trumpable": "忽略 Trumpable",
         "excl_0_snatches": "排除 0 完成数(Snatched)",
         "auto_dl_torrent": "自动下载种子",
+        "min_seeders": "最少做种人数:",
         "buffer_limit_gb": "保护 Buffer (GB):",
         "formula": "公式:",
         "auto_use_fl_token": "自动使用 FL Token",
@@ -102,6 +104,7 @@ TRANSLATIONS = {
         "fit_screen": "Auto Fit Screen (80%)",
         
         "core_config": "Core Config",
+        "site": "Site:",
         "api_key": "API Key:",
         "media": "Media:",
         "order_by": "Order By:",
@@ -119,6 +122,7 @@ TRANSLATIONS = {
         "ignore_trumpable": "Ignore Trumpable",
         "excl_0_snatches": "Excl 0 Snatches",
         "auto_dl_torrent": "Auto DL Torrent",
+        "min_seeders": "Min Seeders:",
         "buffer_limit_gb": "Protect Buffer (GB):",
         "formula": "Formula:",
         "auto_use_fl_token": "Auto use FL Token",
