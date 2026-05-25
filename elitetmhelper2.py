@@ -9,6 +9,7 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, font as tkfont, filedialog
 import threading
 from types import SimpleNamespace
+from i18n import _
 
 # ==========================================
 # 站点配置
@@ -21,6 +22,7 @@ SITE_CONFIGS = {
         "base_url": "https://redacted.sh",
         "tracker_url": "https://flacsfor.me/announce",
         "source": "RED",
+        "max_pages": 5,
     },
     "OPS": {
         "name": "OPS (Orpheus)",
@@ -28,6 +30,7 @@ SITE_CONFIGS = {
         "base_url": "https://orpheus.network",
         "tracker_url": "https://home.opsfet.ch/announce",
         "source": "OPS",
+        "max_pages": 5,
     }
 }
 
@@ -81,7 +84,21 @@ class RedactedSession(requests.Session):
 
     def get_api(self, params):
         api_url = getattr(self.options, 'site_config', SITE_CONFIGS["RED"])["api_url"]
-        return self.get(api_url, params=params)
+        retries = 5
+        for attempt in range(retries):
+            res = self.get(api_url, params=params)
+            try:
+                data = res.json()
+            except Exception:
+                return res
+            
+            if data.get("status") != "success" and data.get("error") == "Rate limit exceeded":
+                print(_("log_api_rate_limit").format(attempt=attempt + 1, retries=retries))
+                time.sleep(10)
+                continue
+                
+            return res
+        return res
 
 class Cache:
     def __init__(self, options):
@@ -185,15 +202,17 @@ def search_result_iterator(session, options, found, abort_flag):
     year = int(options.year_latest)
     
     seen_groups = set()
+    site_config = getattr(options, 'site_config', SITE_CONFIGS["RED"])
+    max_pages = site_config.get("max_pages", 5)
 
     while year > int(options.year_earliest) - 1:
         if abort_flag(): # 优化：检查是否需要中断
-            print("\n[!] 搜索被用户手动终止。")
+            print(_("log_search_aborted"))
             return
 
         if options.order_by == "random":
             if found >= options.find_number:
-                print(f"{found} requested torrents found")
+                print(_("log_requested_torrents_found").format(found=found))
                 return # 优化：将 quit() 换成 return
             year = random.choice(list(range(int(options.year_earliest), int(options.year_latest+1))))
         
@@ -226,29 +245,29 @@ def search_result_iterator(session, options, found, abort_flag):
             if "order_way" in extra_params: search_label_parts.append(f"Order:{extra_params['order_way']}")
             search_label = f"[{','.join(search_label_parts)}] " if search_label_parts else ""
             
-            print(f"请求 {year} 年 {search_label}第 1 页...")
+            print(_("log_req_page_1").format(year=year, label=search_label))
             try:
                 first_page = session.get_api(params).json()
             except requests.exceptions.RequestException as e:
-                raise RedactedAPIError(f"网络请求失败: {str(e)}")
+                raise RedactedAPIError(_("log_req_fail").format(e=str(e)))
             except json.decoder.JSONDecodeError:
-                raise RedactedAPIError("无效的登录凭证或 Cookie 过期")
+                raise RedactedAPIError(_("log_invalid_cred"))
 
             if first_page.get("status") != "success":
-                print(f"API 返回异常，跳过... 错误信息: {first_page.get('error', first_page)}")
+                print(_("log_api_err_skip").format(err=first_page.get("error", first_page)))
                 break
                 
             if not first_page["response"]["results"]:
-                print(f"{year} 年 {search_label}没有找到结果")
+                print(_("log_no_results").format(year=year, label=search_label))
                 continue
             else:
                 number_of_pages = first_page["response"]["pages"]
 
-            print(f"找到 {number_of_pages} 页结果")
+            print(_("log_found_pages").format(pages=number_of_pages))
             
-            if number_of_pages > 20:
+            if number_of_pages > max_pages:
                 if "releasetype" not in extra_params and options.release_type == "":
-                    print(f"⚠️ {year} 年 {search_label}结果超过 20 页。正在按 发行类型(Release Type) 细分搜索...")
+                    print(_("log_gt_20_pages_rt").format(year=year, label=search_label, max_pages=max_pages))
                     release_types = [1, 3, 5, 6, 7, 9, 11, 13, 14, 15, 16, 21, 22, 23]
                     for rt in release_types:
                         new_params = extra_params.copy()
@@ -256,7 +275,7 @@ def search_result_iterator(session, options, found, abort_flag):
                         search_queue.append(new_params)
                     continue
                 elif "media" not in extra_params and options.media == "":
-                    print(f"⚠️ {year} 年 {search_label}结果依然超过 20 页。正在按 介质(Media) 细分搜索...")
+                    print(_("log_gt_20_pages_media").format(year=year, label=search_label, max_pages=max_pages))
                     medias = ['CD', 'WEB', 'Vinyl', 'SACD', 'Cassette', 'Blu-Ray', 'DVD', 'Soundboard']
                     for m in medias:
                         new_params = extra_params.copy()
@@ -264,7 +283,7 @@ def search_result_iterator(session, options, found, abort_flag):
                         search_queue.append(new_params)
                     continue
                 elif "order_way" not in extra_params:
-                    print(f"⚠️ {year} 年 {search_label}细分后依然超过 20 页。将分别获取最新和最旧的 1000 个种子...")
+                    print(_("log_gt_20_pages_order").format(year=year, label=search_label, max_pages=max_pages))
                     new_params_desc = extra_params.copy()
                     new_params_desc["order_way"] = "desc"
                     search_queue.append(new_params_desc)
@@ -274,9 +293,9 @@ def search_result_iterator(session, options, found, abort_flag):
                     search_queue.append(new_params_asc)
                     continue
                 else:
-                    print(f"⚠️ {year} 年 {search_label}已穷尽细分策略，只能获取部分数据 (前 20 页)。")
+                    print(_("log_exhausted_split").format(year=year, label=search_label, max_pages=max_pages))
                     
-            actual_pages = min(number_of_pages, 20)
+            actual_pages = min(number_of_pages, max_pages)
 
             for group in first_page["response"]["results"]:
                 if abort_flag(): return
@@ -298,7 +317,7 @@ def search_result_iterator(session, options, found, abort_flag):
                 if options.order_by == "size" and options.order_way == "asc":
                     if any(map(lambda x: x.get("size", 0) > options.max_size, group.get("torrents", []))):
                         exceded_max_size = True
-                        print("文件超出最大体积限制，跳过...")
+                        print(_("log_exceed_max_size"))
                         break
                 yield group
                     
@@ -308,19 +327,19 @@ def search_result_iterator(session, options, found, abort_flag):
             for i in range(2, actual_pages + 1):
                 if abort_flag(): return
                 params["page"] = i
-                print(f"请求 {year} 年 {search_label}第 {i}/{number_of_pages} 页...")
+                print(_("log_req_page_i").format(year=year, label=search_label, i=i, pages=number_of_pages))
                 try:
                     page = session.get_api(params).json()
                 except Exception as e:
-                    print(f"获取第 {i} 页失败，跳过。原因: {str(e)}")
+                    print(_("log_fetch_page_fail").format(i=i, e=str(e)))
                     break
 
                 if page.get("status") != "success":
-                    print(f"API 返回异常，终止当前关键词搜索。错误信息: {page.get('error', page)}")
+                    print(_("log_api_err_abort_kw").format(err=page.get("error", page)))
                     break
 
                 if not page["response"]["results"]:
-                    print(f"达到 API 限制，转到下一个关键词...")
+                    print(_("log_api_limit_next_kw"))
                     break
 
                 for group in page["response"]["results"]:
@@ -342,7 +361,7 @@ def search_result_iterator(session, options, found, abort_flag):
                     if options.order_by == "size" and options.order_way == "asc":
                         if any(map(lambda x: x.get("size", 0) > options.max_size, group.get("torrents", []))):
                             exceded_max_size = True
-                            print("文件超出最大体积限制，跳过...")
+                            print(_("log_exceed_max_size"))
                             break
                     yield group
                 if exceded_max_size:
@@ -357,7 +376,7 @@ def perform_search(options, abort_flag):
     base_url = site_config["base_url"]
     api_url = site_config["api_url"]
     if not options.api_key:
-        print("请提供 API key!")
+        print(_("log_need_api_key"))
         return
 
     session = RedactedSession(options)
@@ -393,13 +412,13 @@ def perform_search(options, abort_flag):
                 # 仅限基本数学运算
                 current_buffer = eval(formula, {"__builtins__": None}, safe_dict)
             except Exception as e:
-                print(f"⚠️ Buffer 公式 '{formula}' 解析失败 ({e})，降级使用默认公式: (U / 0.65) - D")
+                print(_("log_buffer_formula_fail").format(f=formula, e=e))
                 current_buffer = (uploaded / 0.65) - downloaded
                 
             current_buffer_gb = current_buffer / (1024**3)
-            print(f">>> 当前账号 Buffer 约为: {current_buffer_gb:.2f} GB (保护线: {options.buffer_limit} GB)")
+            print(_("log_buffer_info").format(buf=current_buffer_gb, limit=options.buffer_limit))
     except Exception as e:
-        print(f"获取用户账号信息失败，将跳过 Buffer 检查: {e}")
+        print(_("log_skip_buffer_check").format(e=e))
 
     cache = Cache(options) if options.cache != 'Disabled' else False
     search_results = search_result_iterator(session, options, found, abort_flag)
@@ -417,10 +436,10 @@ def perform_search(options, abort_flag):
         try:
             group_info = session.get_api(group_search_params).json()
             if group_info.get("status") != "success" or not isinstance(group_info.get("response"), dict):
-                print(f"获取组信息格式异常或请求失败 groupId={group['groupId']}，跳过。")
+                print(_("log_group_info_format_err").format(id=group["groupId"]))
                 continue
         except Exception as e:
-            print(f"获取组信息失败 groupId={group['groupId']}: {str(e)}")
+            print(_("log_group_info_fail").format(id=group["groupId"], e=str(e)))
             continue
 
         for torrent in group["torrents"]:
@@ -452,7 +471,7 @@ def perform_search(options, abort_flag):
                             myfile.write(f" {round(torrent['size']/1048576, 2)}MB")
                         myfile.write(f"{html_end}\n")
                         
-                    print(f"torrent<{torrent['torrentId']: >7}> : 发现目标! {base_url}/torrents.php?id={group['groupId']}&torrentid={torrent['torrentId']}", end="")
+                    print(_("log_found_target").format(id=torrent["torrentId"], url=f"{base_url}/torrents.php?id={group['groupId']}&torrentid={torrent['torrentId']}"), end="")
                     if options.show_size: print(f" {round(torrent['size']/1048576, 2)}MB", end="")
                     
                     if options.auto_download:
@@ -461,7 +480,7 @@ def perform_search(options, abort_flag):
                         # 检查 Buffer 是否够用
                         if not options.use_fl_token or size_mb < options.fl_token_threshold:
                             if current_buffer_gb - (size_mb / 1024) < options.buffer_limit:
-                                print(f" ⚠️ Buffer 将低于安全线 ({options.buffer_limit} GB)，停止下载当前及后续种子！")
+                                print(_("log_buffer_below_safe").format(limit=options.buffer_limit))
                                 return
                             current_buffer_gb -= (size_mb / 1024) # 扣除预计下载量
 
@@ -486,7 +505,7 @@ def perform_search(options, abort_flag):
                                 
                                 save_path.write_bytes(dl_res.content)
                                 token_str = " (使用了 Token)" if used_token else ""
-                                print(f" [已下载{token_str}: {save_path}]", end="")
+                                print(_("log_dl_success").format(token=token_str, path=save_path), end="")
                                 
                                 # 将 metadata 保存为 json 供 PipelineManager 读取
                                 meta_path = save_path.with_suffix('.json')
@@ -499,12 +518,12 @@ def perform_search(options, abort_flag):
                                 
                                 # 推送到 qBittorrent
                                 if hasattr(options, 'pipeline') and options.pipeline:
-                                    options.pipeline.add_to_pipeline(str(save_path), group_info, torrent, str(save_path.parent))
+                                    options.pipeline.add_to_pipeline(str(save_path), group_info, torrent, None)
                                     
                             else:
-                                print(f" [下载失败 {dl_res.status_code}]", end="")
+                                print(_("log_dl_fail_code").format(code=dl_res.status_code), end="")
                         except Exception as e:
-                            print(f" [下载异常: {e}]", end="")
+                            print(_("log_dl_exception").format(e=e), end="")
                     
                     print("")
                     
@@ -512,21 +531,21 @@ def perform_search(options, abort_flag):
                         cache.data[str(torrent['torrentId'])] = "yay"
                         cache.write()
                 else:
-                    print(f"torrent<{torrent['torrentId']: >7}> : 忽略{''.join(nope)}")
+                    print(_("log_ignore_reason").format(id=torrent["torrentId"], nope="".join(nope)))
                     if cache:
                         cache.data[str(torrent['torrentId'])] = "nope"
                         cache.write()
             else:
-                print(f"torrent<{torrent['torrentId']: >7}> : 忽略 (非独立24bit)")
+                print(_("log_ignore_not_24bit").format(id=torrent["torrentId"]))
                 if cache:
                     cache.data[str(torrent['torrentId'])] = "nope"
                     cache.write()
                     
             if found >= options.find_number:
-                print(f"\n✅ 已达到设定的目标数量: {found} 个")
+                print(_("log_target_reached").format(found=found))
                 return
 
-    print(f"\n🏁 搜索完成，共找到 {found} 个结果")
+    print(_("log_search_done").format(found=found))
 
 
 # ==========================================
@@ -543,8 +562,14 @@ class RedirectText:
 
     def write(self, string):
         try:
+            # Check if scrollbar is at the bottom before inserting
+            yview = self.output.yview()
+            is_at_bottom = yview[1] >= 0.99
+            
             self.output.insert(tk.END, string)
-            self.output.see(tk.END)
+            
+            if is_at_bottom:
+                self.output.see(tk.END)
         except Exception:
             pass
 
@@ -555,6 +580,7 @@ class AppGUI:
     def __init__(self, parent):
         self.parent = parent
         self.is_running = False
+        self.pipeline = None
         
         self.site_configs_data = {"RED": {}, "OPS": {}}
         self._is_switching_site = False
@@ -728,7 +754,7 @@ class AppGUI:
                         
                     else:
                         # 兼容旧版本：将现有的扁平配置分别克隆到两个站点中
-                        print("检测到旧版配置，正在迁移到新版分站配置结构...")
+                        print(_("log_migrate_config"))
                         if 'site' in config: self.site_var.set(config['site'])
                         self.last_site = self.site_var.get()
                         
@@ -756,7 +782,7 @@ class AppGUI:
                         self.apply_site_settings(self.site_configs_data.get(self.last_site, {}))
                         
         except Exception as e:
-            print(f"Failed to load config: {e}")
+            print(_("log_config_load_fail").format(e=e))
 
     def save_config(self):
         try:
@@ -777,7 +803,7 @@ class AppGUI:
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=4, ensure_ascii=False)
         except Exception as e:
-            print(f"Failed to save config: {e}")
+            print(_("log_config_save_fail").format(e=e))
 
     def build_ui(self):
         self.scrollable_frame = ctk.CTkScrollableFrame(self.parent)
@@ -896,17 +922,17 @@ class AppGUI:
         self.log_tabs = ctk.CTkTabview(log_frame)
         self.log_tabs.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        self.log_tabs.add("主日志")
-        self.log_tabs.add("处理日志")
-        self.log_tabs.add("检测日志")
+        self.log_tabs.add(_("log_tab_main"))
+        self.log_tabs.add(_("log_tab_process"))
+        self.log_tabs.add(_("log_tab_check"))
         
-        self.log_text_main = ctk.CTkTextbox(self.log_tabs.tab("主日志"), wrap=tk.WORD)
+        self.log_text_main = ctk.CTkTextbox(self.log_tabs.tab(_("log_tab_main")), wrap=tk.WORD)
         self.log_text_main.pack(fill=tk.BOTH, expand=True)
         
-        self.log_text_process = ctk.CTkTextbox(self.log_tabs.tab("处理日志"), wrap=tk.WORD)
+        self.log_text_process = ctk.CTkTextbox(self.log_tabs.tab(_("log_tab_process")), wrap=tk.WORD)
         self.log_text_process.pack(fill=tk.BOTH, expand=True)
         
-        self.log_text_check = ctk.CTkTextbox(self.log_tabs.tab("检测日志"), wrap=tk.WORD)
+        self.log_text_check = ctk.CTkTextbox(self.log_tabs.tab(_("log_tab_check")), wrap=tk.WORD)
         self.log_text_check.pack(fill=tk.BOTH, expand=True)
 
         sys.stdout = RedirectText(self.log_text_main)
@@ -989,7 +1015,7 @@ class AppGUI:
 
     def start_search(self):
         if not self.api_key_var.get().strip():
-            messagebox.showwarning("提示", "执行前请先填入有效的 API Key！")
+            messagebox.showwarning(_("msg_tip_title"), _("msg_need_api_key_box"))
             return
 
         self.save_config()
@@ -1000,7 +1026,7 @@ class AppGUI:
         self.log_text_main.delete(1.0, tk.END)
         self.log_text_process.delete(1.0, tk.END)
         self.log_text_check.delete(1.0, tk.END)
-        print(">>> 正在启动后台搜索线程，请稍候...\n")
+        print(_("log_starting_bg_search"))
 
         threading.Thread(target=self.run_thread, daemon=True).start()
 
@@ -1009,7 +1035,7 @@ class AppGUI:
         result_var = [False]
 
         def show_prompt():
-            res = messagebox.askyesno("人工确认", f"种子 {album_name} 无损检测未通过。\n您是否确认该种子没有问题，并继续上传发布？", parent=self.parent)
+            res = messagebox.askyesno(_("msg_manual_confirm_title"), _("msg_manual_confirm_prompt").format(album=album_name), parent=self.parent)
             result_var[0] = res
             result_event.set()
 
@@ -1019,39 +1045,45 @@ class AppGUI:
 
     def stop_search(self):
         self.is_running = False
-        print("\n>>> 正在发送停止信号，等待当前请求完成...\n")
+        print(_("log_sending_stop"))
         self.stop_btn.configure(state=tk.DISABLED)
 
     def run_thread(self):
         try:
             options = self.get_options()
             
+            if hasattr(self, 'pipeline') and self.pipeline:
+                self.pipeline.stop()
+                self.pipeline = None
+            
             pipeline = None
             if options.enable_pipeline:
                 try:
+                    import time as _time
                     from pipeline_manager import PipelineManager
                     pipeline = PipelineManager(
                         options.qb_host, options.qb_port, options.qb_user, options.qb_pass,
                         None, options, 
-                        log_main=lambda s: self.log_main.write(s + "\n"),
-                        log_process=lambda s: self.log_process.write(s + "\n"),
-                        log_check=lambda s: self.log_check.write(s + "\n"),
+                        log_main=lambda s: self.log_main.write(f"[{_time.strftime('%H:%M:%S')}] {s}\n"),
+                        log_process=lambda s: self.log_process.write(f"[{_time.strftime('%H:%M:%S')}] {s}\n"),
+                        log_check=lambda s: self.log_check.write(f"[{_time.strftime('%H:%M:%S')}] {s}\n"),
                         ask_manual_check=self.ask_manual_check
                     )
                     pipeline.start()
+                    self.pipeline = pipeline
                     options.pipeline = pipeline
                 except Exception as e:
-                    print(f"初始化流水线失败: {e}")
+                    print(_("log_init_pipeline_fail").format(e=e))
             
             perform_search(options, abort_flag=lambda: not self.is_running)
             
             if pipeline:
-                print(">>> 搜索完成，流水线监控将继续在后台运行，直至您关闭程序。")
+                print(_("log_search_done_pipeline_bg"))
         except RedactedAPIError as e:
-            print(f"\n❌ [API 错误]: {str(e)}")
+            print(_("log_api_error_final").format(e=str(e)))
         except Exception as e:
             import traceback
-            print(f"\n❌ [系统错误]: 发生未捕获的异常 - {str(e)}\n{traceback.format_exc()}")
+            print(_("log_sys_error_final").format(e=str(e), tb=traceback.format_exc()))
             self.stop_search()
         finally:
             self.is_running = False

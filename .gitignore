@@ -14,3 +14,13 @@ dist/config.json
 dist/EliteTMHelper2_Found.txt
 EliteTMHelper2.spec
 *.json
+*.flac
+*.log
+*.cue
+*.jpg
+*.txt
+*.txt
+*.m3u
+*.m3u8
+/build
+*.spec

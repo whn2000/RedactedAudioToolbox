@@ -27,7 +27,7 @@ def check_sox_installed():
 def get_audio_nyquist(file_path):
     """通过 soxi 获取音频的采样率并计算尼奎斯特频率"""
     try:
-        result = subprocess.run(["soxi", "-r", str(file_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **SUBPROCESS_KWARGS)
+        result = subprocess.run(["sox", "--info", "-r", str(file_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **SUBPROCESS_KWARGS)
         samplerate = int(result.stdout.strip())
         return samplerate / 2
     except Exception:
@@ -36,9 +36,9 @@ def get_audio_nyquist(file_path):
 def get_audio_specs(file_path):
     """通过 soxi 获取音频的位深和采样率"""
     try:
-        res_sr = subprocess.run(["soxi", "-r", str(file_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **SUBPROCESS_KWARGS)
+        res_sr = subprocess.run(["sox", "--info", "-r", str(file_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **SUBPROCESS_KWARGS)
         sample_rate = int(res_sr.stdout.strip())
-        res_b = subprocess.run(["soxi", "-b", str(file_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **SUBPROCESS_KWARGS)
+        res_b = subprocess.run(["sox", "--info", "-b", str(file_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **SUBPROCESS_KWARGS)
         bit_depth = int(res_b.stdout.strip())
         return bit_depth, sample_rate
     except Exception:
@@ -53,9 +53,12 @@ def analyze_spectrogram(raw_img_path, nyquist_freq, threshold=10):
         cutoff_row = 0
         for y in range(height):
             row_pixels = [img.getpixel((x, y)) for x in range(width)]
-            avg_brightness = sum(row_pixels) / width
             
-            if avg_brightness > threshold:
+            # 使用更宽容的策略来照顾频谱不饱满的舒缓歌曲：
+            # 只要有少量较高亮度的点(>30)占比超过1%，或者出现过明显的高频峰值(>80)，就认为该频段存在有效信号
+            # 这能避免平均亮度(avg_brightness)被大面积黑色稀释导致的错判
+            bright_pixels = sum(1 for p in row_pixels if p > 30)
+            if bright_pixels > width * 0.01 or max(row_pixels) > 80:
                 cutoff_row = y
                 break
         
@@ -79,18 +82,20 @@ def judge_lossless(cutoff_freq, bit_depth, sample_rate):
             return f"⚠️ 疑似假Hi-Res ({specs})", "高频延伸不足预期。"
             
     if sample_rate == 48000:
-        if cutoff_freq >= 22000:
+        if cutoff_freq >= 20000:
             return f"✅ 真无损 ({specs})", "高频延伸正常。"
-        elif cutoff_freq < 20000:
+        elif cutoff_freq < 18000:
             return f"❌ 假无损/假Hi-Res ({specs})", "高频严重缺失。"
+        else:
+            return f"⚠️ 疑似假无损 ({specs})", "高频稍有不足(可能是自然衰减)。"
             
     # 默认 44.1kHz 逻辑
-    if cutoff_freq >= 20000:
+    if cutoff_freq >= 19500:
         return f"✅ 真无损 ({specs})", "高频延伸正常。"
-    elif 19000 <= cutoff_freq < 20000:
-        return f"⚠️ 疑似假无损 ({specs})", "高频在20kHz附近被切断。"
-    elif 15500 <= cutoff_freq < 19000:
-        return f"❌ 严重假无损 ({specs})", "高频在16k-18k就被切断。"
+    elif 18000 <= cutoff_freq < 19500:
+        return f"⚠️ 疑似假无损 ({specs})", "高频在18k-19.5k被切断(可能是舒缓乐曲自然衰减)。"
+    elif 15000 <= cutoff_freq < 18000:
+        return f"❌ 严重假无损 ({specs})", "高频在15k-18k之间就被明显切断。"
     else:
         return f"🚨 极差音质 ({specs})", "高频严重缺失。"
 
@@ -238,8 +243,13 @@ class RedirectText:
 
     def write(self, string):
         try:
+            yview = self.output.yview()
+            is_at_bottom = yview[1] >= 0.99
+            
             self.output.insert(tk.END, string)
-            self.output.see(tk.END)
+            
+            if is_at_bottom:
+                self.output.see(tk.END)
         except Exception:
             pass
 

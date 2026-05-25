@@ -7,6 +7,7 @@ from dependency_manager import check_and_install_dependencies
 from elitetmhelper2 import AppGUI as RedactedFinderGUI
 from flac_downsampler import FlacDownsamplerGUI
 from lossless_checker import LosslessCheckerGUI
+from gui.audit_tab import AuditTabGUI
 
 from i18n import _, set_language, CURRENT_LANG, subscribe_lang_change
 
@@ -31,6 +32,9 @@ class MainApp:
         self.change_window_size(1024, 768)
 
     def build_tabs(self):
+        if hasattr(self, 'app1') and self.app1 and hasattr(self.app1, 'pipeline') and self.app1.pipeline:
+            self.app1.pipeline.stop()
+            
         if self.tabview:
             self.tabview.destroy()
             
@@ -40,14 +44,17 @@ class MainApp:
         self.tab_name_search = _("tab_search")
         self.tab_name_downsample = _("tab_downsample")
         self.tab_name_check = _("tab_check")
+        self.tab_name_audit = "Quality Audit"
         
         self.tabview.add(self.tab_name_search)
         self.tabview.add(self.tab_name_downsample)
         self.tabview.add(self.tab_name_check)
+        self.tabview.add(self.tab_name_audit)
         
         self.app1 = RedactedFinderGUI(self.tabview.tab(self.tab_name_search))
         self.app2 = FlacDownsamplerGUI(self.tabview.tab(self.tab_name_downsample))
         self.app3 = LosslessCheckerGUI(self.tabview.tab(self.tab_name_check))
+        self.app4 = AuditTabGUI(self.tabview.tab(self.tab_name_audit))
 
     def update_ui_text(self):
         self.root.title(_("title"))

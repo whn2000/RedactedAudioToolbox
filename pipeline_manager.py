@@ -7,6 +7,7 @@ from torf import Torrent
 from qbittorrent_client import QbittorrentClient
 from flac_downsampler import process_album as flac_downsample_album
 from lossless_checker import process_album as check_lossless_album
+from i18n import _
 import traceback
 
 _DEFAULT_SITE_CONFIG = {
@@ -40,21 +41,21 @@ class PipelineManager:
     def start(self):
         if self.is_running: return
         self.is_running = True
-        self.log_main(">>> 自动处理流水线监控已启动...")
+        self.log_main(_("log_pipeline_started"))
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.monitor_thread.start()
 
     def stop(self):
         self.is_running = False
-        self.log_main(">>> 自动处理流水线监控已停止。")
+        self.log_main(_("log_pipeline_stopped"))
 
     def add_to_pipeline(self, torrent_path, group_info, torrent_info, save_path):
         """将种子添加到 qB 并加入追踪列表"""
         success = self.qb.add_torrent(torrent_path, save_path=save_path, category="red_auto")
         if success:
-            self.log_main(f"    [Pipeline] 已成功推送到 qBittorrent: {Path(torrent_path).name}")
+            self.log_main(_("log_push_qb_success").format(name=Path(torrent_path).name))
         else:
-            self.log_main(f"    [Pipeline] ❌ 推送 qBittorrent 失败: {Path(torrent_path).name}")
+            self.log_main(_("log_push_qb_fail").format(name=Path(torrent_path).name))
 
     def _monitor_loop(self):
         while self.is_running:
@@ -78,25 +79,30 @@ class PipelineManager:
                                 json.dump(list(self.processed_hashes), f)
                         except Exception:
                             pass
-                        self.log_main(f"    [Pipeline] 📥 下载完成，准备处理: {name}")
-                        
-                        # 改变类别防止重复触发 (备用)
-                        self._change_category(hash_str, "red_processed")
+                        self.log_main(_("log_dl_complete_ready").format(name=name))
                         
                         # 启动异步任务处理，避免阻塞轮询
                         threading.Thread(target=self._process_downloaded_torrent, args=(save_path, name, t), daemon=True).start()
 
             except Exception as e:
-                self.log_main(f"    [Pipeline] 监控出现异常: {e}")
+                self.log_main(_("log_monitor_exception").format(e=e))
                 
             time.sleep(10) # 每 10 秒轮询一次
 
     def _change_category(self, torrent_hash, new_category):
-        url = f"{self.qb.base_url}/api/v2/torrents/setCategory"
+        # 尝试先创建分类（如果存在则会静默失败，不影响）
+        create_url = f"{self.qb.base_url}/api/v2/torrentCategories/create"
         try:
-            self.qb.session.post(url, data={'hashes': torrent_hash, 'category': new_category})
+            self.qb.session.post(create_url, data={'category': new_category})
         except:
             pass
+            
+        url = f"{self.qb.base_url}/api/v2/torrents/setCategory"
+        try:
+            resp = self.qb.session.post(url, data={'hashes': torrent_hash, 'category': new_category})
+            return resp.status_code == 200
+        except:
+            return False
 
     def _process_downloaded_torrent(self, save_path, name, qb_torrent_info):
         try:
@@ -105,48 +111,82 @@ class PipelineManager:
             api_url = site_config["api_url"]
             album_dir = Path(save_path) / name
             if not album_dir.exists() or not album_dir.is_dir():
-                self.log_process(f"    [Pipeline] ❌ 找不到下载的文件夹: {album_dir}")
+                self.log_process(_("log_album_dir_not_found").format(album_dir=album_dir))
                 return
 
             output_dir = album_dir.parent / f"{album_dir.name} (16bit)"
-            official_torrent = album_dir.parent / f"{output_dir.name}_official.torrent"
+            generated_torrent = album_dir.parent / f"{output_dir.name}.torrent"
             
-            if official_torrent.exists():
-                self.log_process(f"    [Pipeline] ⏭️ 发现本地已存在官方种子 ({official_torrent.name})，说明此前已成功上传，跳过重复处理。")
-                return
-
-            self.log_process(f"    [Pipeline] 💿 开始降频制种: {name}")
-            # 1. 降频
-            # flac_downsampler 的 process_album 其实处理的是单张专辑目录
-            # 我们需要获取 group_info, 这个目前没有传给 qb，我们可以通过解析目录里的 metadata 或直接盲转
-            tracker_url = site_config.get("tracker_url", "https://flacsfor.me/announce")
-            source_flag = site_config.get("source", "RED")
-            # 实际的 process_album 会搜索 flac，并生成 16bit 目录
-            flac_downsample_album(album_dir, tracker_url, source_flag) 
-            
-            # 找到生成的 16bit 目录
-            output_dir = album_dir.parent / f"{album_dir.name} (16bit)"
-            if not output_dir.exists():
-                self.log_process(f"    [Pipeline] ⚠️ 降频未生成 16bit 文件夹（可能原本就是 16bit）: {name}")
-                return
-
-            self.log_check(f"    [Pipeline] 🎵 开始进行无损检查: {output_dir.name}")
-            # 2. 检查无损 (Fast Mode)
-            is_lossless = check_lossless_album(output_dir, fast_mode=True)
-            if not is_lossless:
-                self.log_check(f"    [Pipeline] 🚨 警告: 假无损检测未通过: {output_dir.name}")
-                if self.ask_manual_check:
-                    self.log_check(f"    [Pipeline] ⏳ 正在等待人工确认: {output_dir.name}")
-                    user_confirmed = self.ask_manual_check(output_dir.name)
-                    if not user_confirmed:
-                        self.log_check(f"    [Pipeline] 🛑 人工确认未通过，已中止自动上传: {output_dir.name}")
-                        return
-                    self.log_check(f"    [Pipeline] 👍 人工确认通过，继续发布流程: {output_dir.name}")
-                else:
-                    self.log_check(f"    [Pipeline] 🛑 且未配置人工确认，已中止自动上传: {output_dir.name}")
-                    return
+            # 如果降频目录和种子文件都已经存在，则跳过降频和检测阶段
+            if output_dir.exists() and generated_torrent.exists():
+                self.log_process(_("log_skip_downsample_check"))
+            else:
+                self.log_process(_("log_start_downsample").format(name=name))
+                tracker_url = site_config.get("tracker_url", "https://flacsfor.me/announce")
+                source_flag = site_config.get("source", "RED")
+                # 实际的 process_album 会搜索 flac，并生成 16bit 目录
+                flac_downsample_album(album_dir, tracker_url, source_flag) 
                 
-            self.log_check(f"    [Pipeline] ✅ 无损检测通过 (或人工放行)，准备上传: {output_dir.name}")
+                # 找到生成的 16bit 目录
+                if not output_dir.exists():
+                    self.log_process(_("log_downsample_no_16bit").format(name=name))
+                    raise Exception(_("err_downsample_no_16bit"))
+
+                self.log_check(_("log_start_lossless_check").format(name=output_dir.name))
+                # 2. 检查无损 (Fast Mode) 并在本地接入审核引擎(Risk Engine)
+                
+                # --- [新增] Phase 2: Risk Engine Upload Blocker ---
+                from quality.features.extractor import FeatureExtractor
+                from quality.risk.engine import RiskEngine
+                from quality.models import AudioContext
+
+                try:
+                    self.log_check(_("log_start_quality_scan"))
+                    ctx = AudioContext(
+                        album_dir=output_dir, 
+                        format="FLAC", 
+                        source=site_config.get("source", "RED"), 
+                        bitrate="Lossless"
+                    )
+                    extractor = FeatureExtractor()
+                    ctx.features = extractor.extract_album(output_dir)
+                    
+                    engine = RiskEngine()
+                    report = engine.evaluate(ctx)
+                    
+                    if report.level in ["SUSPICIOUS", "HIGH_RISK", "LIKELY_TRANSCODE"]:
+                        self.log_check(_("log_upload_blocked_risk").format(level=report.level, score=report.score))
+                        for rule in report.rule_results:
+                            if rule.score_delta > 0:
+                                self.log_check(_("log_risk_reason").format(delta=rule.score_delta, reason=rule.reason))
+                        
+                        raise Exception(_("err_upload_blocked").format(level=report.level))
+                    else:
+                        self.log_check(_("log_risk_passed").format(level=report.level))
+
+                except Exception as e:
+                    self.log_check(_("log_audit_intercepted_or_exception").format(e=e))
+                    self._mark_failed(qb_torrent_info)
+                    return
+                # --- [结束] Phase 2: Risk Engine Upload Blocker ---
+
+                is_lossless = check_lossless_album(output_dir, fast_mode=True)
+                if not is_lossless:
+                    self.log_check(_("log_lossless_fail").format(name=output_dir.name))
+                    if self.ask_manual_check:
+                        self.log_check(_("log_wait_manual_confirm").format(name=output_dir.name))
+                        user_confirmed = self.ask_manual_check(output_dir.name)
+                        if not user_confirmed:
+                            self.log_check(_("log_manual_confirm_fail").format(name=output_dir.name))
+                            self._mark_failed(qb_torrent_info)
+                            return
+                        self.log_check(_("log_manual_confirm_pass").format(name=output_dir.name))
+                    else:
+                        self.log_check(_("log_no_manual_confirm_configured").format(name=output_dir.name))
+                        self._mark_failed(qb_torrent_info)
+                        return
+                
+            self.log_check(_("log_lossless_pass_uploading").format(name=output_dir.name))
             
             # 3. 自动上传 (从本地 .json 恢复 Context)
             json_meta_path = None
@@ -167,7 +207,8 @@ class PipelineManager:
                     pass
             
             if not json_meta_path:
-                self.log_main(f"    [Pipeline] ❌ 找不到元数据辅助文件 (按 Hash {hash_str_lower} 匹配失败)，无法执行自动上传。")
+                self.log_main(_("log_no_meta_file").format(hash=hash_str_lower))
+                self._mark_failed(qb_torrent_info)
                 return
                 
             with open(json_meta_path, 'r', encoding='utf-8') as f:
@@ -225,10 +266,10 @@ class PipelineManager:
                 upload_data['remaster_record_label'] = str(r_label)
                 upload_data['remaster_catalogue_number'] = str(r_cat)
                 
-            # 寻找生成的 torrent 文件
             generated_torrent = album_dir.parent / f"{output_dir.name}.torrent"
             if not generated_torrent.exists():
-                self.log_main(f"    [Pipeline] ❌ 找不到生成的种子文件: {generated_torrent.name}")
+                self.log_main(_("log_no_generated_torrent").format(name=generated_torrent.name))
+                self._mark_failed(qb_torrent_info)
                 return
                 
             # 执行上传
@@ -242,7 +283,7 @@ class PipelineManager:
                 'User-Agent': 'EliteTMHelper_AutoUpload'
             }
             
-            self.log_main(f"    [Pipeline] 🚀 正在向 {site_config.get('source', 'RED')} 提交 POST 请求...")
+            self.log_main(_("log_post_upload").format(source=site_config.get("source", "RED")))
             with open(generated_torrent, 'rb') as f:
                 files = {'file_input': (generated_torrent.name, f, 'application/x-bittorrent')}
                 # 注意：requests 在传递 dict 到 data 时，不要将 headers 设为 multipart/form-data，requests 会自动处理 boundary
@@ -254,32 +295,60 @@ class PipelineManager:
                     if resp_json.get('status') == 'success':
                         new_torrent_id = resp_json['response'].get('torrentid') or resp_json['response'].get('torrentId')
                         new_link = f"{base_url}/torrents.php?id={group_id}&torrentid={new_torrent_id}"
-                        self.log_main(f"    [Pipeline] 🎉 自动上传成功！")
-                        self.log_main(f"    [Pipeline] 🔗 新种子链接: {new_link}")
+                        self.log_main(_("log_upload_success"))
+                        self.log_main(_("log_new_torrent_link").format(link=new_link))
                         
                         # 成功上传后，必须从 RED 下载打上了官方 tracker passkey 和 source 标记的新种子
-                        self.log_main(f"    [Pipeline] 📥 正在从 {site_config.get('source', 'RED')} 下载官方种子文件以进行做种...")
+                        self.log_main(_("log_dl_official_torrent").format(source=site_config.get("source", "RED")))
                         dl_url = f"{api_url}?action=download&id={new_torrent_id}"
                         dl_resp = requests.get(dl_url, headers=headers, timeout=30)
                         
-                        if dl_resp.status_code == 200:
+                        if dl_resp.status_code == 200 and b'd8:announce' in dl_resp.content[:50]:
                             official_torrent = album_dir.parent / f"{output_dir.name}_official.torrent"
                             official_torrent.write_bytes(dl_resp.content)
                             
-                            self.log_process(f"    [Pipeline] 🔄 正在将官方 16bit 新种子加入 qBittorrent 做种...")
+                            self.log_process(_("log_add_official_to_qb"))
                             self.qb.add_torrent(str(official_torrent), save_path=str(album_dir.parent), category="red_seeding")
                         else:
-                            self.log_main(f"    [Pipeline] ❌ 下载官方种子失败 (状态码: {dl_resp.status_code})，请手动前往网站下载并做种。")
+                            self.log_main(_("log_dl_official_fail"))
+                            
+                        # 无论下载种子是否成功，上传都已经成功了，应该标记为 processed
+                        self._change_category(hash_str_lower, "red_processed")
                             
                     else:
-                        self.log_main(f"    [Pipeline] ❌ 上传 API 返回失败状态: {resp_json}")
+                        self.log_main(_("log_upload_api_fail").format(resp=resp_json))
+                        self._mark_failed(qb_torrent_info)
                 except Exception as e:
-                    self.log_main(f"    [Pipeline] ❌ 上传成功但解析返回 JSON 失败: {e} | Resp: {resp.text[:200]}")
+                    self.log_main(_("log_upload_json_parse_fail").format(e=e, text=resp.text[:200]))
+                    self._mark_failed(qb_torrent_info)
             else:
-                self.log_main(f"    [Pipeline] ❌ 上传 HTTP 请求失败, 状态码: {resp.status_code}")
+                self.log_main(_("log_upload_http_fail").format(code=resp.status_code))
                 self.log_main(f"    [Pipeline] {resp.text[:500]}")
+                self._mark_failed(qb_torrent_info)
 
         except Exception as e:
-            self.log_main(f"    [Pipeline] ❌ 处理流水线异常: {e}")
+            self.log_main(_("log_pipeline_exception").format(e=e))
             traceback.print_exc()
+            self._mark_failed(qb_torrent_info)
+
+    def _mark_failed(self, qb_torrent_info):
+        if not qb_torrent_info: return
+        hash_str = qb_torrent_info.get("hash")
+        
+        # 将类别改为 red_failed，防止自动轮询陷入死循环。
+        success = self._change_category(hash_str, "red_failed")
+        
+        # 只有在类别成功改变，确保它不再被 red_auto 捕获的情况下，才从 processed_hashes 中移除
+        # 如果分类修改失败，我们决不能将其移除，否则会导致无限死循环
+        if success:
+            if hash_str and hash_str in self.processed_hashes:
+                self.processed_hashes.remove(hash_str)
+                try:
+                    with open(self.cache_file, "w", encoding='utf-8') as f:
+                        json.dump(list(self.processed_hashes), f)
+                except Exception:
+                    pass
+            self.log_process(_("log_task_failed_red_failed"))
+        else:
+            self.log_process(_("log_task_failed_cant_change_cat"))
 

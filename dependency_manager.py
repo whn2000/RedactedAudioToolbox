@@ -28,13 +28,22 @@ def setup_environment():
         BIN_DIR.mkdir(parents=True, exist_ok=True)
     os.environ["PATH"] = str(BIN_DIR) + os.pathsep + os.environ["PATH"]
 
+import shutil
+
 def is_installed(cmd):
     """检查命令是否可用"""
+    # 优先在 bin 目录检查
+    if (BIN_DIR / f"{cmd}.exe").exists():
+        return True
+    # 再检查系统 PATH
+    if shutil.which(cmd):
+        return True
+    
+    # 兼容原有的 subprocess 检查
     try:
-        # ffmpeg 和 sox 都支持 --version 参数
         subprocess.run([cmd, "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
         return True
-    except FileNotFoundError:
+    except Exception:
         return False
 
 class DependencyDownloaderDialog(tk.Toplevel):
