@@ -22,7 +22,8 @@ SITE_CONFIGS = {
         "base_url": "https://redacted.sh",
         "tracker_url": "https://flacsfor.me/announce",
         "source": "RED",
-        "max_pages": 5,
+        "max_pages": 20,
+        "enable_tag_split": True,
     },
     "OPS": {
         "name": "OPS (Orpheus)",
@@ -30,9 +31,35 @@ SITE_CONFIGS = {
         "base_url": "https://orpheus.network",
         "tracker_url": "https://home.opsfet.ch/announce",
         "source": "OPS",
-        "max_pages": 5,
+        "max_pages": 20,
+        "enable_tag_split": False,
     }
 }
+
+# ==========================================
+# 搜索拆分策略常量
+# ==========================================
+
+# 流派标签 - 用于 Layer 3 拆分 (仅 RED)
+GENRE_TAGS = [
+    'rock', 'electronic', 'pop', 'hip.hop', 'jazz', 'classical',
+    'folk', 'metal', 'soul', 'r.and.b', 'country', 'blues',
+    'ambient', 'experimental', 'punk', 'funk', 'world',
+    'drum.and.bass', 'house', 'techno', 'indie',
+]
+
+# 多排序组合 - 用于 Layer 4 拆分
+ORDER_COMBOS = [
+    ('time', 'desc'),
+    ('time', 'asc'),
+    ('size', 'desc'),
+    ('size', 'asc'),
+    ('seeders', 'desc'),
+    ('snatched', 'desc'),
+]
+
+# 完整 media 列表 - 用于 Layer 2 拆分
+MEDIA_TYPES = ['CD', 'WEB', 'Vinyl', 'SACD', 'Cassette', 'Blu-Ray', 'DVD', 'Soundboard', 'DAT', 'Other']
 
 # ==========================================
 # 核心业务逻辑 (基于原脚本优化)
@@ -203,7 +230,8 @@ def search_result_iterator(session, options, found, abort_flag):
     
     seen_groups = set()
     site_config = getattr(options, 'site_config', SITE_CONFIGS["RED"])
-    max_pages = site_config.get("max_pages", 5)
+    max_pages = site_config.get("max_pages", 20)
+    enable_tag_split = site_config.get("enable_tag_split", True)
 
     while year > int(options.year_earliest) - 1:
         if abort_flag(): # 优化：检查是否需要中断
@@ -216,11 +244,15 @@ def search_result_iterator(session, options, found, abort_flag):
                 return # 优化：将 quit() 换成 return
             year = random.choice(list(range(int(options.year_earliest), int(options.year_latest+1))))
         
-        search_queue = [{}]
+        # 每个 queue item 携带拆分历史，便于决定下一步拆分方向
+        # {"params": {额外搜索参数}, "splits": [已使用的拆分维度列表]}
+        search_queue = [{"params": {}, "splits": []}]
         
         while search_queue:
             if abort_flag(): return
-            extra_params = search_queue.pop(0)
+            item = search_queue.pop(0)
+            extra_params = item["params"]
+            splits_done = item["splits"]
             
             exceded_max_size = False
             params = {
@@ -242,7 +274,11 @@ def search_result_iterator(session, options, found, abort_flag):
             search_label_parts = []
             if "releasetype" in extra_params: search_label_parts.append(f"RT:{extra_params['releasetype']}")
             if "media" in extra_params: search_label_parts.append(f"Media:{extra_params['media']}")
-            if "order_way" in extra_params: search_label_parts.append(f"Order:{extra_params['order_way']}")
+            if "taglist" in extra_params: search_label_parts.append(f"Tag:{extra_params['taglist']}")
+            if "order_by" in extra_params or "order_way" in extra_params:
+                ob = extra_params.get('order_by', options.order_by)
+                ow = extra_params.get('order_way', options.order_way)
+                search_label_parts.append(f"Sort:{ob}/{ow}")
             search_label = f"[{','.join(search_label_parts)}] " if search_label_parts else ""
             
             print(_("log_req_page_1").format(year=year, label=search_label))
@@ -265,32 +301,42 @@ def search_result_iterator(session, options, found, abort_flag):
 
             print(_("log_found_pages").format(pages=number_of_pages))
             
+            # 仅当 API 返回超过 max_pages (20) 页时才需要拆分
             if number_of_pages > max_pages:
-                if "releasetype" not in extra_params and options.release_type == "":
+                # Layer 1: 按 Release Type 拆分
+                if "releasetype" not in splits_done and "releasetype" not in extra_params and options.release_type == "":
                     print(_("log_gt_20_pages_rt").format(year=year, label=search_label, max_pages=max_pages))
                     release_types = [1, 3, 5, 6, 7, 9, 11, 13, 14, 15, 16, 21, 22, 23]
                     for rt in release_types:
                         new_params = extra_params.copy()
                         new_params["releasetype"] = rt
-                        search_queue.append(new_params)
+                        search_queue.append({"params": new_params, "splits": splits_done + ["releasetype"]})
                     continue
-                elif "media" not in extra_params and options.media == "":
+                # Layer 2: 按 Media 拆分
+                elif "media" not in splits_done and "media" not in extra_params and options.media == "":
                     print(_("log_gt_20_pages_media").format(year=year, label=search_label, max_pages=max_pages))
-                    medias = ['CD', 'WEB', 'Vinyl', 'SACD', 'Cassette', 'Blu-Ray', 'DVD', 'Soundboard']
-                    for m in medias:
+                    for m in MEDIA_TYPES:
                         new_params = extra_params.copy()
                         new_params["media"] = m
-                        search_queue.append(new_params)
+                        search_queue.append({"params": new_params, "splits": splits_done + ["media"]})
                     continue
-                elif "order_way" not in extra_params:
+                # Layer 3: 按流派 Tag 拆分 (仅 RED 启用)
+                elif enable_tag_split and "taglist" not in splits_done and "taglist" not in extra_params:
+                    print(_("log_gt_20_pages_tag").format(year=year, label=search_label, max_pages=max_pages))
+                    for tag in GENRE_TAGS:
+                        new_params = extra_params.copy()
+                        new_params["taglist"] = tag
+                        new_params["tags_type"] = 1  # 精确匹配
+                        search_queue.append({"params": new_params, "splits": splits_done + ["taglist"]})
+                    continue
+                # Layer 4: 多排序组合拆分
+                elif "order_combo" not in splits_done:
                     print(_("log_gt_20_pages_order").format(year=year, label=search_label, max_pages=max_pages))
-                    new_params_desc = extra_params.copy()
-                    new_params_desc["order_way"] = "desc"
-                    search_queue.append(new_params_desc)
-                    
-                    new_params_asc = extra_params.copy()
-                    new_params_asc["order_way"] = "asc"
-                    search_queue.append(new_params_asc)
+                    for ob, ow in ORDER_COMBOS:
+                        new_params = extra_params.copy()
+                        new_params["order_by"] = ob
+                        new_params["order_way"] = ow
+                        search_queue.append({"params": new_params, "splits": splits_done + ["order_combo"]})
                     continue
                 else:
                     print(_("log_exhausted_split").format(year=year, label=search_label, max_pages=max_pages))
