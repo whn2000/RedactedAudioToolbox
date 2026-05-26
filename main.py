@@ -8,8 +8,12 @@ from elitetmhelper2 import AppGUI as RedactedFinderGUI
 from flac_downsampler import FlacDownsamplerGUI
 from lossless_checker import LosslessCheckerGUI
 from gui.audit_tab import AuditTabGUI
+from gui.failed_tasks_tab import FailedTasksGUI
 
 from i18n import _, set_language, CURRENT_LANG, subscribe_lang_change
+from core.context import AppContext
+from core.consolidation import WriteGuardMode, default_guard
+import core.globals
 
 ctk.set_appearance_mode("System")  # Modes: "System" (standard), "Dark", "Light"
 ctk.set_default_color_theme("blue")  # Themes: "blue" (standard), "green", "dark-blue"
@@ -45,16 +49,19 @@ class MainApp:
         self.tab_name_downsample = _("tab_downsample")
         self.tab_name_check = _("tab_check")
         self.tab_name_audit = "Quality Audit"
+        self.tab_name_failed = "Failed Tasks"
         
         self.tabview.add(self.tab_name_search)
         self.tabview.add(self.tab_name_downsample)
         self.tabview.add(self.tab_name_check)
         self.tabview.add(self.tab_name_audit)
+        self.tabview.add(self.tab_name_failed)
         
         self.app1 = RedactedFinderGUI(self.tabview.tab(self.tab_name_search))
         self.app2 = FlacDownsamplerGUI(self.tabview.tab(self.tab_name_downsample))
         self.app3 = LosslessCheckerGUI(self.tabview.tab(self.tab_name_check))
         self.app4 = AuditTabGUI(self.tabview.tab(self.tab_name_audit))
+        self.app5 = FailedTasksGUI(self.tabview.tab(self.tab_name_failed), getattr(self.app1, 'pipeline', None))
 
     def update_ui_text(self):
         self.root.title(_("title"))
@@ -111,5 +118,16 @@ if __name__ == "__main__":
         messagebox.showerror("错误/Error", "缺少必要的环境依赖 (ffmpeg, sox) / Missing dependencies (ffmpeg, sox).")
         sys.exit(1)
         
+    core.globals.app_context = AppContext()
+    core.globals.app_context.startup()
+    
+    # Configure WriteGuard to strictly block legacy writes going forward
+    default_guard.mode = WriteGuardMode.STRICT
+    default_guard.set_gateway(core.globals.app_context.gateway)
+    
     app = MainApp(root)
-    root.mainloop()
+    
+    try:
+        root.mainloop()
+    finally:
+        core.globals.app_context.shutdown()

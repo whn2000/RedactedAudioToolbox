@@ -90,6 +90,16 @@ def create_pt_torrent(source_dir, torrent_path, tracker_url, source_flag):
     print(f"  ✅ 种子已生成: {torrent_path.name}")
 
 
+def get_16bit_dir_name(original_name: str) -> str:
+    """获取 16bit 目录名称，限制长度以避免 RED 种子文件名过长报错"""
+    name_bytes = original_name.encode('utf-8')
+    if len(name_bytes) > 60:
+        truncated = name_bytes[:60].decode('utf-8', 'ignore').strip()
+        if truncated.endswith('-'):
+            truncated = truncated[:-1].strip()
+        return f"{truncated} (16bit)"
+    return f"{original_name} (16bit)"
+
 def process_album(input_path, tracker_url, source_flag):
     """处理单张专辑的逻辑"""
     flac_files = list(input_path.glob('**/*.flac'))
@@ -111,8 +121,9 @@ def process_album(input_path, tracker_url, source_flag):
         print(f"  -> ⏭️ 已经是 16bit 或以下，跳过转换。")
         return
 
-    # 创建输出目录，例如 "Album Name (16bit)"
-    output_path = input_path.parent / f"{input_path.name} (16bit)"
+    # 创建输出目录，并限制长度
+    output_dir_name = get_16bit_dir_name(input_path.name)
+    output_path = input_path.parent / output_dir_name
     output_path.mkdir(exist_ok=True)
     print(f"  -> 输出目录: {output_path.name}")
 
@@ -122,7 +133,26 @@ def process_album(input_path, tracker_url, source_flag):
 
     for item in input_path.glob('**/*'):
         rel_path = item.relative_to(input_path)
-        target_item = output_path / rel_path
+        
+        # 处理可能的长文件名
+        parts = list(rel_path.parts)
+        if not item.is_dir():
+            filename = parts[-1]
+            folder_len = len(output_path.name.encode('utf-8'))
+            subdirs_len = sum(len(p.encode('utf-8')) + 1 for p in parts[:-1])
+            allowed_filename_bytes = 170 - folder_len - subdirs_len - 1
+            if allowed_filename_bytes < 20:
+                allowed_filename_bytes = 20
+                
+            filename_bytes = filename.encode('utf-8')
+            if len(filename_bytes) > allowed_filename_bytes:
+                ext = item.suffix
+                ext_bytes = ext.encode('utf-8')
+                base_len = allowed_filename_bytes - len(ext_bytes)
+                safe_base = filename_bytes[:base_len].decode('utf-8', 'ignore').strip()
+                parts[-1] = safe_base + ext
+
+        target_item = output_path.joinpath(*parts)
 
         if item.is_dir():
             target_item.mkdir(exist_ok=True)

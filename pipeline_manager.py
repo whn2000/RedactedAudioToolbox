@@ -5,7 +5,7 @@ import json
 import requests
 from torf import Torrent
 from qbittorrent_client import QbittorrentClient
-from flac_downsampler import process_album as flac_downsample_album
+from flac_downsampler import process_album as flac_downsample_album, get_16bit_dir_name
 from lossless_checker import process_album as check_lossless_album
 from i18n import _
 import traceback
@@ -30,11 +30,25 @@ class PipelineManager:
         self.monitor_thread = None
         self.tracked_torrents = {} # hash -> dict(group_info, torrent_info)
         self.processed_hashes = set()
+        
+        import core.globals
+        self.db = core.globals.app_context.db if core.globals.app_context else None
+        
+        if self.db:
+            rows = self.db.fetch_all("SELECT hash FROM pipeline_processed")
+            for r in rows:
+                self.processed_hashes.add(r['hash'])
+                
         self.cache_file = Path("pipeline_cache.json")
         if self.cache_file.exists():
             try:
                 with open(self.cache_file, "r", encoding='utf-8') as f:
-                    self.processed_hashes = set(json.load(f))
+                    old_hashes = json.load(f)
+                for h in old_hashes:
+                    self.processed_hashes.add(h)
+                    if self.db:
+                        self.db.execute("INSERT OR IGNORE INTO pipeline_processed (hash) VALUES (?)", (h,))
+                self.cache_file.unlink(missing_ok=True)
             except Exception:
                 pass
 
@@ -74,11 +88,8 @@ class PipelineManager:
                             continue
                             
                         self.processed_hashes.add(hash_str)
-                        try:
-                            with open(self.cache_file, "w", encoding='utf-8') as f:
-                                json.dump(list(self.processed_hashes), f)
-                        except Exception:
-                            pass
+                        if self.db:
+                            self.db.execute("INSERT OR IGNORE INTO pipeline_processed (hash) VALUES (?)", (hash_str,))
                         self.log_main(_("log_dl_complete_ready").format(name=name))
                         
                         # 启动异步任务处理，避免阻塞轮询
@@ -114,7 +125,8 @@ class PipelineManager:
                 self.log_process(_("log_album_dir_not_found").format(album_dir=album_dir))
                 return
 
-            output_dir = album_dir.parent / f"{album_dir.name} (16bit)"
+            output_dir_name = get_16bit_dir_name(album_dir.name)
+            output_dir = album_dir.parent / output_dir_name
             generated_torrent = album_dir.parent / f"{output_dir.name}.torrent"
             
             # 如果降频目录和种子文件都已经存在，则跳过降频和检测阶段
@@ -343,11 +355,8 @@ class PipelineManager:
         if success:
             if hash_str and hash_str in self.processed_hashes:
                 self.processed_hashes.remove(hash_str)
-                try:
-                    with open(self.cache_file, "w", encoding='utf-8') as f:
-                        json.dump(list(self.processed_hashes), f)
-                except Exception:
-                    pass
+                if self.db:
+                    self.db.execute("DELETE FROM pipeline_processed WHERE hash = ?", (hash_str,))
             self.log_process(_("log_task_failed_red_failed"))
         else:
             self.log_process(_("log_task_failed_cant_change_cat"))

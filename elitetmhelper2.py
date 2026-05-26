@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import random
 import tkinter as tk
+import core.globals
 from tkinter import ttk, scrolledtext, messagebox, font as tkfont, filedialog
 import threading
 from types import SimpleNamespace
@@ -131,18 +132,36 @@ class Cache:
     def __init__(self, options):
         self.options = options
         self.json_file = Path(self.options.cache)
-        if Path(self.json_file).exists():
-            with self.json_file.open() as json_file_open:
+        self.cache_key = self.options.cache
+        
+        if core.globals.app_context and core.globals.app_context.gateway:
+            gateway = core.globals.app_context.gateway
+            cached_str = gateway.read_cache("elitetm", self.cache_key, None)
+            if cached_str:
                 try:
-                    self.data = json.load(json_file_open)
+                    self.data = json.loads(cached_str)
                 except json.JSONDecodeError:
                     self.data = {'0': "nope"}
+            else:
+                self.data = {'0': "nope"}
+                gateway.write_cache("elitetm", self.cache_key, json.dumps(self.data), 86400 * 30)
         else:
-            self.data = {'0': "nope"}
-            self.json_file.write_text(json.dumps(self.data))
+            if Path(self.json_file).exists():
+                with self.json_file.open() as json_file_open:
+                    try:
+                        self.data = json.load(json_file_open)
+                    except json.JSONDecodeError:
+                        self.data = {'0': "nope"}
+            else:
+                self.data = {'0': "nope"}
+                self.json_file.write_text(json.dumps(self.data))
 
     def write(self):
-        self.json_file.write_text(json.dumps(self.data))
+        if core.globals.app_context and core.globals.app_context.gateway:
+            gateway = core.globals.app_context.gateway
+            gateway.write_cache("elitetm", self.cache_key, json.dumps(self.data), 86400 * 30)
+        else:
+            self.json_file.write_text(json.dumps(self.data))
 
     def check(self, torrent_id):
         return str(torrent_id) in self.data
@@ -777,6 +796,64 @@ class AppGUI:
 
     def load_config(self):
         try:
+            if core.globals.app_context and core.globals.app_context.gateway:
+                gateway = core.globals.app_context.gateway
+                # We retrieve the entire flat structure that auto_migration_runner migrated.
+                # Actually, the migration runner writes it using flat key paths but also dict structure.
+                # Just fetching it via get_config("") or getting the dict structure directly might be tricky if it was saved flat.
+                # BUT wait, the migration runner wrote it by unrolling the dict.
+                # We can just fetch the whole config from gateway.config.config_data or get individual keys.
+                # Wait, getting individual keys is safer:
+                
+                # Check if it was migrated
+                has_site = gateway.get_config("site")
+                if has_site is not None:
+                    # New Gateway-based config load
+                    config = gateway.config.config_data
+                    
+                    if "sites" in config:
+                        self.site_configs_data = config.get("sites", {"RED": {}, "OPS": {}})
+                        
+                        if 'site' in config: 
+                            self.site_var.set(config['site'])
+                        self.last_site = self.site_var.get()
+                        
+                        global_config = config.get("global", {})
+                        if 'qb_host' in global_config: self.qb_host_var.set(global_config['qb_host'])
+                        if 'qb_port' in global_config: self.qb_port_var.set(global_config['qb_port'])
+                        if 'qb_user' in global_config: self.qb_user_var.set(global_config['qb_user'])
+                        if 'qb_pass' in global_config: self.qb_pass_var.set(global_config['qb_pass'])
+                        if 'enable_pipeline' in global_config: self.enable_pipeline_var.set(global_config['enable_pipeline'])
+                        
+                        self.apply_site_settings(self.site_configs_data.get(self.last_site, {}))
+                        
+                    else:
+                        print(_("log_migrate_config"))
+                        if 'site' in config: self.site_var.set(config['site'])
+                        self.last_site = self.site_var.get()
+                        
+                        if 'qb_host' in config: self.qb_host_var.set(config['qb_host'])
+                        if 'qb_port' in config: self.qb_port_var.set(config['qb_port'])
+                        if 'qb_user' in config: self.qb_user_var.set(config['qb_user'])
+                        if 'qb_pass' in config: self.qb_pass_var.set(config['qb_pass'])
+                        if 'enable_pipeline' in config: self.enable_pipeline_var.set(config['enable_pipeline'])
+                        
+                        migrated_site_config = config.copy()
+                        old_api_keys = config.get('api_keys', {})
+                        if not old_api_keys and 'api_key' in config:
+                            old_api_keys = {"RED": config['api_key'], "OPS": config['api_key']}
+                            
+                        self.apply_site_settings(migrated_site_config)
+                        self.site_configs_data["RED"] = self.get_current_site_settings()
+                        self.site_configs_data["OPS"] = self.get_current_site_settings()
+                        
+                        self.site_configs_data["RED"]["api_key"] = old_api_keys.get("RED", "")
+                        self.site_configs_data["OPS"]["api_key"] = old_api_keys.get("OPS", "")
+                        
+                        self.apply_site_settings(self.site_configs_data.get(self.last_site, {}))
+                return
+            
+            # Fallback for testing standalone
             if Path(self.config_file).exists():
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     config = json.load(f)
@@ -846,8 +923,17 @@ class AppGUI:
                 },
                 'sites': self.site_configs_data
             }
-            with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(config, f, indent=4, ensure_ascii=False)
+            
+            if core.globals.app_context and core.globals.app_context.gateway:
+                gateway = core.globals.app_context.gateway
+                gateway.set_config("site", config["site"])
+                gateway.set_config("global", config["global"])
+                gateway.set_config("sites", config["sites"])
+                # We can also sync api_keys to keyring, but since elitetmhelper2 currently mixes them in config,
+                # letting YAML store it temporarily during UI transition is fine, or we can explicitly migrate them here.
+            else:
+                with open(self.config_file, 'w', encoding='utf-8') as f:
+                    json.dump(config, f, indent=4, ensure_ascii=False)
         except Exception as e:
             print(_("log_config_save_fail").format(e=e))
 
@@ -1016,7 +1102,7 @@ class AppGUI:
             min_seeders=self._safe_int(self.min_seeders_var, 0),
             order_by=self.order_by_var.get(),
             order_way="desc",
-            output=f'EliteTMHelper2_{self.site_var.get()}_Found.txt',
+            output=str(core.globals.app_context.paths.output_dir / f'EliteTMHelper2_{self.site_var.get()}_Found.txt') if core.globals.app_context else f'EliteTMHelper2_{self.site_var.get()}_Found.txt',
             output_args=False,
             html=False,
             find_number=self._safe_int(self.number_var, 50),
