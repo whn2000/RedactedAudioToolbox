@@ -291,7 +291,6 @@ This project is licensed under the MIT License — see the [LICENSE](LICENSE) fi
 - [FFmpeg](https://ffmpeg.org/) — Audio processing
 - [SoX](https://sox.sourceforge.net/) — Sound eXchange & spectrogram generation
 - [torf](https://github.com/rndusr/torf) — Torrent file creation
-- [Redacted](https://redacted.sh/) & [Orpheus](https://orpheus.network/) — Music tracker APIs
 
 ---
 ---
@@ -570,7 +569,6 @@ RedactedAudioToolbox/
 - [FFmpeg](https://ffmpeg.org/) — 音频处理
 - [SoX](https://sox.sourceforge.net/) — 声音处理 & 频谱图生成
 - [torf](https://github.com/rndusr/torf) — 种子文件创建
-- [Redacted](https://redacted.sh/) & [Orpheus](https://orpheus.network/) — 音乐 Tracker API
 
 ---
 
