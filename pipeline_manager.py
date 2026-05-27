@@ -145,42 +145,7 @@ class PipelineManager:
                     raise Exception(_("err_downsample_no_16bit"))
 
                 self.log_check(_("log_start_lossless_check").format(name=output_dir.name))
-                # 2. 检查无损 (Fast Mode) 并在本地接入审核引擎(Risk Engine)
-                
-                # --- [新增] Phase 2: Risk Engine Upload Blocker ---
-                from quality.features.extractor import FeatureExtractor
-                from quality.risk.engine import RiskEngine
-                from quality.models import AudioContext
-
-                try:
-                    self.log_check(_("log_start_quality_scan"))
-                    ctx = AudioContext(
-                        album_dir=output_dir, 
-                        format="FLAC", 
-                        source=site_config.get("source", "RED"), 
-                        bitrate="Lossless"
-                    )
-                    extractor = FeatureExtractor()
-                    ctx.features = extractor.extract_album(output_dir)
-                    
-                    engine = RiskEngine()
-                    report = engine.evaluate(ctx)
-                    
-                    if report.level in ["SUSPICIOUS", "HIGH_RISK", "LIKELY_TRANSCODE"]:
-                        self.log_check(_("log_upload_blocked_risk").format(level=report.level, score=report.score))
-                        for rule in report.rule_results:
-                            if rule.score_delta > 0:
-                                self.log_check(_("log_risk_reason").format(delta=rule.score_delta, reason=rule.reason))
-                        
-                        raise Exception(_("err_upload_blocked").format(level=report.level))
-                    else:
-                        self.log_check(_("log_risk_passed").format(level=report.level))
-
-                except Exception as e:
-                    self.log_check(_("log_audit_intercepted_or_exception").format(e=e))
-                    self._mark_failed(qb_torrent_info)
-                    return
-                # --- [结束] Phase 2: Risk Engine Upload Blocker ---
+                # 2. 检查无损 (Fast Mode)，此步骤现由 AAFS 接管
 
                 is_lossless = check_lossless_album(output_dir, fast_mode=True)
                 if not is_lossless:

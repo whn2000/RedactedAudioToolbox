@@ -177,7 +177,14 @@ TRANSLATIONS = {
         "file_status": "状态",
         "log_tab_main": "主日志",
         "log_tab_process": "处理日志",
-        "log_tab_check": "检测日志"
+        "log_tab_check": "检测日志",
+        
+        # AAFS Logger
+        "log_start_aafs_check": ">>> 正在启动真假无损/Hi-Res 检测{mode_str}...\n",
+        "log_found_files_aafs": "找到 {total_files} 个音频文件，开始并发分析...",
+        "log_aafs_genuine": "✅ 真无损/真Hi-Res",
+        "log_aafs_fake_reason": "\n      └─ 鉴定原因: {reason_str}",
+        "log_aafs_exception": "❌ 分析异常: {e}"
     },
     "en_US": {
         "log_sys_error_final": "\n❌ [System Error]: Uncaught exception - {e}\n{tb}",
@@ -336,7 +343,14 @@ TRANSLATIONS = {
         "file_status": "Status",
         "log_tab_main": "Main Log",
         "log_tab_process": "Process Log",
-        "log_tab_check": "Check Log"
+        "log_tab_check": "Check Log",
+        
+        # AAFS Logger
+        "log_start_aafs_check": ">>> Starting Lossless/Hi-Res Check{mode_str}...\n",
+        "log_found_files_aafs": "Found {total_files} audio files, starting concurrent analysis...",
+        "log_aafs_genuine": "✅ Genuine Lossless/Hi-Res",
+        "log_aafs_fake_reason": "\n      └─ Reason: {reason_str}",
+        "log_aafs_exception": "❌ Analysis Exception: {e}"
     }
 }
 

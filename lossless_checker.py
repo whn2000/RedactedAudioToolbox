@@ -8,6 +8,22 @@ import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, scrolledtext
 
+# AAFS Imports
+import sys
+from pathlib import Path
+current_dir = Path(__file__).parent.absolute()
+aafs_dir = current_dir / "aafs"
+if str(aafs_dir) not in sys.path:
+    sys.path.insert(0, str(aafs_dir))
+
+import numpy as np
+import librosa
+from aafs.extractors.brickwall import detect_brickwall
+from aafs.extractors.spectral_holes import detect_spectral_holes
+from aafs.extractors.bit_depth import detect_fake_bit_depth_via_lsb
+from aafs.extractors.provenance import detect_tape_hiss_or_analog_noise
+from aafs.inference.scorer import SimpleScorer
+
 if os.name == 'nt':
     SUBPROCESS_KWARGS = {'creationflags': 0x08000000}
 else:
@@ -44,99 +60,110 @@ def get_audio_specs(file_path):
     except Exception:
         return 16, 44100
 
-def analyze_spectrogram(raw_img_path, nyquist_freq, threshold=10):
-    """分析无坐标轴的纯净频谱图，计算截止频率"""
-    try:
-        img = Image.open(raw_img_path).convert('L')
-        width, height = img.size
-        
-        cutoff_row = 0
-        for y in range(height):
-            row_pixels = [img.getpixel((x, y)) for x in range(width)]
-            
-            # 使用更宽容的策略来照顾频谱不饱满的舒缓歌曲：
-            # 只要有少量较高亮度的点(>30)占比超过1%，或者出现过明显的高频峰值(>80)，就认为该频段存在有效信号
-            # 这能避免平均亮度(avg_brightness)被大面积黑色稀释导致的错判
-            bright_pixels = sum(1 for p in row_pixels if p > 30)
-            if bright_pixels > width * 0.01 or max(row_pixels) > 80:
-                cutoff_row = y
-                break
-        
-        cutoff_freq = nyquist_freq * (1 - (cutoff_row / height))
-        return round(cutoff_freq, 2)
-    except Exception as e:
-        print(f"[-] 图像分析失败: {e}")
-        return None
 
-def judge_lossless(cutoff_freq, bit_depth, sample_rate):
-    """根据截止频率和原始参数综合判断真伪及 Hi-Res"""
-    specs = f"{bit_depth}bit/{sample_rate/1000:g}kHz"
+
+from i18n import _, CURRENT_LANG
+
+def translate_aafs_reason(reason_str):
+    if CURRENT_LANG != "zh_CN":
+        return reason_str
     
-    # 检查是否是假高解析度 (Fake Hi-Res)
-    if sample_rate > 48000:
-        if cutoff_freq < 24000:
-            return f"❌ 假Hi-Res ({specs})", "高频被切断，疑为低采样率拉升。"
-        elif cutoff_freq >= 30000:
-            return f"✅ 真Hi-Res ({specs})", "高频延伸符合高解析度特征。"
-        else:
-            return f"⚠️ 疑似假Hi-Res ({specs})", "高频延伸不足预期。"
-            
-    if sample_rate == 48000:
-        if cutoff_freq >= 20000:
-            return f"✅ 真无损 ({specs})", "高频延伸正常。"
-        elif cutoff_freq < 18000:
-            return f"❌ 假无损/假Hi-Res ({specs})", "高频严重缺失。"
-        else:
-            return f"⚠️ 疑似假无损 ({specs})", "高频稍有不足(可能是自然衰减)。"
-            
-    # 默认 44.1kHz 逻辑
-    if cutoff_freq >= 19500:
-        return f"✅ 真无损 ({specs})", "高频延伸正常。"
-    elif 18000 <= cutoff_freq < 19500:
-        return f"⚠️ 疑似假无损 ({specs})", "高频在18k-19.5k被切断(可能是舒缓乐曲自然衰减)。"
-    elif 15000 <= cutoff_freq < 18000:
-        return f"❌ 严重假无损 ({specs})", "高频在15k-18k之间就被明显切断。"
-    else:
-        return f"🚨 极差音质 ({specs})", "高频严重缺失。"
+    reason_str = reason_str.replace("fake_lossless (transcoded)", "假无损 (由低音质转码)")
+    reason_str = reason_str.replace("fake_hi_res (upsampled)", "假高解析 (由低采样率拉升)")
+    reason_str = reason_str.replace("fake_hi_res (padded_bitdepth)", "假高解析 (位深填充)")
+    reason_str = reason_str.replace("genuine", "真无损/高解析")
+    
+    if "Brickwall filter detected with cutoff around" in reason_str:
+        reason_str = reason_str.replace("Brickwall filter detected with cutoff around", "检测到截止频率在")
+        reason_str = reason_str.replace("Hz. Suspected upsample from lower sample rate.", "Hz 附近的砖墙滤波。疑似由低采样率拉升。")
+        
+    if "are quantization dead zones in high-energy frames." in reason_str:
+        reason_str = reason_str.replace("of high-frequency bins (> ", "的高频区(> ")
+        reason_str = reason_str.replace("kHz) are quantization dead zones in high-energy frames.", "kHz) 为量化死区。")
+        reason_str = reason_str.replace("Indicative of psychoacoustic lossy compression.", "这是心理声学有损压缩的显著特征。")
+        
+    if "LSB autocorrelation energy is" in reason_str:
+        reason_str = reason_str.replace("LSB autocorrelation energy is", "LSB 自相关能量为")
+        reason_str = reason_str.replace(", indicating synthetic TPDF dither rather than acoustic noise floor.", "，表明其为人工添加的 TPDF 抖动而非原声底噪。")
+        reason_str = reason_str.replace("Effective bit-depth is", "实际有效位深约为")
+        
+    if "zero-padding was detected" in reason_str:
+        reason_str = reason_str.replace("The file claims to be 24-bit, but 16-bit to 24-bit zero-padding was detected. Effective bit-depth is 16.", "文件声称为 24-bit，但检测到了 16-bit 到 24-bit 的补零填充。实际有效位深为 16。")
+        
+    return reason_str
 
 def analyze_single_file(file_path, idx, total, output_dir, fast_mode=False):
-    """处理单个文件的并发任务"""
+    """处理单个文件的并发任务 (AAFS 集成版)"""
     filename = file_path.name
     base_name = file_path.stem
-    print(f"[{idx}/{total}] 正在处理: {filename}")
 
     nyquist = get_audio_nyquist(file_path)
     bit_depth, sample_rate = get_audio_specs(file_path)
     
-    raw_img = output_dir / f"temp_raw_{idx}.png"
     temp_view_img = output_dir / f"temp_view_{idx}.png"
 
-    result_dict = {"file": filename, "cutoff": None, "verdict": "处理失败", "specs": f"{bit_depth}bit/{sample_rate/1000:g}kHz", "view_img": None}
+    result_dict = {"file": filename, "verdict": "处理失败", "specs": f"{bit_depth}bit/{sample_rate/1000:g}kHz", "view_img": None, "is_fake": True}
 
     try:
-        # 并发执行这两条命令也可以，但为了简单，这里直接顺序执行
-        subprocess.run(["sox", str(file_path), "-n", "spectrogram", "-r", "-Y", "512", "-o", str(raw_img)], 
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, **SUBPROCESS_KWARGS)
-        
+        # 保留 SoX 生成频谱图的功能（为了最后拼长图）
         if not fast_mode:
             subprocess.run(["sox", str(file_path), "-n", "spectrogram", "-t", base_name, "-o", str(temp_view_img)], 
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, **SUBPROCESS_KWARGS)
 
-        if raw_img.exists():
-            cutoff = analyze_spectrogram(raw_img, nyquist)
-            raw_img.unlink() # 清理纯净图
+        # 启动 AAFS 法医级核心分析
+        y, sr = librosa.load(file_path, sr=None, mono=True)
+        S_complex = librosa.stft(y, n_fft=2048, hop_length=512, window='blackmanharris')
+        S_mag = np.abs(S_complex)
+        S_db = librosa.amplitude_to_db(S_mag, ref=np.max)
+        freqs = librosa.fft_frequencies(sr=sr, n_fft=2048)
+        
+        evidences = []
+        
+        # 1. Brickwall (如果名义上是 Hi-Res)
+        is_hi_res = (sr >= 48000) or (bit_depth >= 24)
+        if is_hi_res or sr == 48000:
+            ev_bw = detect_brickwall(S_db, freqs, nyquist_check=22050)
+            if ev_bw: evidences.append(ev_bw)
+            if sr > 48000:
+                ev_bw2 = detect_brickwall(S_db, freqs, nyquist_check=24000)
+                if ev_bw2: evidences.append(ev_bw2)
             
-            if cutoff is not None:
-                verdict, _ = judge_lossless(cutoff, bit_depth, sample_rate)
-                result_dict["cutoff"] = cutoff
-                result_dict["verdict"] = verdict
-                print(f"    -> {filename} 截止频率: {cutoff} Hz | 结论: {verdict}")
+        # 2. Spectral Holes
+        ev_holes = detect_spectral_holes(S_mag, freqs, start_freq=16000.0)
+        if ev_holes: evidences.append(ev_holes)
+            
+        # 3. Bit depth LSB
+        if bit_depth > 16:
+            ev_lsb = detect_fake_bit_depth_via_lsb(y, declared_bit_depth=bit_depth)
+            if ev_lsb: evidences.append(ev_lsb)
+            
+        # 4. Provenance
+        ev_prov = detect_tape_hiss_or_analog_noise(S_mag, freqs)
+        if ev_prov: evidences.append(ev_prov)
+            
+        # 评分与降权
+        scorer = SimpleScorer()
+        score_res = scorer.evaluate(evidences)
+        
+        verdict = score_res["classification"]
+        reasons = score_res["summary_reasons"]
+        
+        if verdict == "genuine":
+            result_dict["verdict"] = _("log_aafs_genuine")
+            result_dict["is_fake"] = False
+        else:
+            translated_reasons = [translate_aafs_reason(r) for r in reasons]
+            reason_str = " | ".join(translated_reasons)
+            translated_verdict = translate_aafs_reason(verdict)
+            reason_format = _("log_aafs_fake_reason").format(reason_str=reason_str)
+            result_dict["verdict"] = f"❌ {translated_verdict}{reason_format}"
+            result_dict["is_fake"] = True
             
         if temp_view_img.exists():
             result_dict["view_img"] = temp_view_img
 
     except Exception as e:
-        print(f"    -> {filename} 处理异常: {e}")
+        result_dict["verdict"] = _("log_aafs_exception").format(e=e)
 
     return result_dict
 
@@ -168,11 +195,12 @@ def process_album(album_dir, output_dir=None, fast_mode=False):
     audio_files.sort(key=lambda x: x.name)
     total_files = len(audio_files)
 
-    print(f"找到 {total_files} 个音频文件，开始并发分析并生成合并长图...")
+    print(_("log_found_files_aafs").format(total_files=total_files))
     print("-" * 80)
     
     results = []
     view_images_to_stitch = []
+    completed = 0
 
     # 引入并发加速
     with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -180,6 +208,8 @@ def process_album(album_dir, output_dir=None, fast_mode=False):
         for future in concurrent.futures.as_completed(futures):
             res = future.result()
             results.append(res)
+            completed += 1
+            print(f"[{completed}/{total_files}] {res['file']}\n    => {res['verdict']}\n")
 
     # 为了保证合并时长图顺序正确，需要对结果进行排序
     results.sort(key=lambda x: x["file"])
@@ -225,9 +255,8 @@ def process_album(album_dir, output_dir=None, fast_mode=False):
     # 汇总结论，如果都是真无损则返回 True
     all_lossless = True
     for r in results:
-        cutoff_str = f"{r['cutoff']:.1f} Hz" if r['cutoff'] is not None else "N/A"
-        print(f"{r['file'][:38]:<40} | {cutoff_str:<10} | {r['verdict']}")
-        if "假" in r['verdict'] or "差" in r['verdict'] or "失败" in r['verdict']:
+        print(f"{r['file'][:38]:<40} | {r['verdict']}")
+        if r["is_fake"]:
             all_lossless = False
             
     print("=" * 88)
@@ -235,23 +264,25 @@ def process_album(album_dir, output_dir=None, fast_mode=False):
 
 
 import customtkinter as ctk
-from i18n import _
 
 class RedirectText:
     def __init__(self, text_ctrl):
         self.output = text_ctrl
 
     def write(self, string):
-        try:
-            yview = self.output.yview()
-            is_at_bottom = yview[1] >= 0.99
-            
-            self.output.insert(tk.END, string)
-            
-            if is_at_bottom:
-                self.output.see(tk.END)
-        except Exception:
-            pass
+        def _write():
+            try:
+                yview = self.output.yview()
+                is_at_bottom = yview[1] >= 0.99
+                
+                self.output.insert(tk.END, string)
+                
+                if is_at_bottom:
+                    self.output.see(tk.END)
+            except Exception:
+                pass
+        # 强制将写入操作发送到主线程，防止并发打印导致 Tkinter 崩溃或产生大量空白
+        self.output.after(0, _write)
 
     def flush(self):
         pass
@@ -311,8 +342,8 @@ class LosslessCheckerGUI:
         old_stdout = sys.stdout
         sys.stdout = RedirectText(self.log_text)
         try:
-            mode_str = " (快速模式)" if self.fast_mode_var.get() else ""
-            print(f">>> 正在启动真假无损/Hi-Res 检测{mode_str}...\n")
+            mode_str = (" (Fast Mode)" if CURRENT_LANG != "zh_CN" else " (快速模式)") if self.fast_mode_var.get() else ""
+            print(_("log_start_aafs_check").format(mode_str=mode_str))
             process_album(self.input_dir_var.get(), fast_mode=self.fast_mode_var.get())
         except Exception as e:
             print(f"\n❌ [错误]: {str(e)}")
