@@ -66,3 +66,24 @@ class QbittorrentClient:
             return []
         except Exception:
             return []
+
+    def set_category(self, hashes, category):
+        if not self.is_logged_in and not self.login():
+            return False
+            
+        # 尝试先创建分类
+        create_url = f"{self.base_url}/api/v2/torrentCategories/create"
+        try:
+            self.session.post(create_url, data={'category': category})
+        except:
+            pass
+            
+        url = f"{self.base_url}/api/v2/torrents/setCategory"
+        try:
+            resp = self.session.post(url, data={'hashes': hashes, 'category': category})
+            if resp.status_code == 403:  # Session expired
+                if self.login():
+                    resp = self.session.post(url, data={'hashes': hashes, 'category': category})
+            return resp.status_code == 200
+        except Exception:
+            return False

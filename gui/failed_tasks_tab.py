@@ -10,6 +10,7 @@ class FailedTasksGUI:
         self.parent = parent_frame
         self.pipeline = pipeline
         self.checkboxes = {}
+        self.task_widgets = []
         
         self.top_frame = ctk.CTkFrame(self.parent)
         self.top_frame.pack(fill=tk.X, padx=10, pady=10)
@@ -40,9 +41,10 @@ class FailedTasksGUI:
         self.btn_refresh.configure(state="disabled")
         self.status_label.configure(text="Refreshing...")
         
-        # Clear existing checkboxes
-        for widget in self.scroll_frame.winfo_children():
+        # Clear existing checkboxes and labels
+        for widget in self.task_widgets:
             widget.destroy()
+        self.task_widgets.clear()
         self.checkboxes.clear()
         
         threading.Thread(target=self._fetch_failed_thread, daemon=True).start()
@@ -61,6 +63,7 @@ class FailedTasksGUI:
         if not torrents:
             lbl = ctk.CTkLabel(self.scroll_frame, text="No failed tasks found.", text_color="gray")
             lbl.pack(pady=20)
+            self.task_widgets.append(lbl)
             return
             
         for t in torrents:
@@ -72,6 +75,7 @@ class FailedTasksGUI:
             
             chk = ctk.CTkCheckBox(self.scroll_frame, text=name, variable=var)
             chk.pack(anchor="w", padx=10, pady=5)
+            self.task_widgets.append(chk)
 
     def _on_error(self, error_msg: str) -> None:
         self.btn_refresh.configure(state="normal")

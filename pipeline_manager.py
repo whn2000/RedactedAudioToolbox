@@ -5,7 +5,7 @@ import json
 import requests
 from torf import Torrent
 from qbittorrent_client import QbittorrentClient
-from flac_downsampler import process_album as flac_downsample_album, get_16bit_dir_name
+from flac_downsampler import process_album as flac_downsample_album, get_16bit_dir_name, process_mp3_album, get_mp3_dir_name
 from lossless_checker import process_album as check_lossless_album
 from i18n import _
 import traceback
@@ -101,19 +101,7 @@ class PipelineManager:
             time.sleep(10) # 每 10 秒轮询一次
 
     def _change_category(self, torrent_hash, new_category):
-        # 尝试先创建分类（如果存在则会静默失败，不影响）
-        create_url = f"{self.qb.base_url}/api/v2/torrentCategories/create"
-        try:
-            self.qb.session.post(create_url, data={'category': new_category})
-        except:
-            pass
-            
-        url = f"{self.qb.base_url}/api/v2/torrents/setCategory"
-        try:
-            resp = self.qb.session.post(url, data={'hashes': torrent_hash, 'category': new_category})
-            return resp.status_code == 200
-        except:
-            return False
+        return self.qb.set_category(torrent_hash, new_category)
 
     def _process_downloaded_torrent(self, save_path, name, qb_torrent_info):
         try:
@@ -165,6 +153,11 @@ class PipelineManager:
                 
             self.log_check(_("log_lossless_pass_uploading").format(name=output_dir.name))
             
+            ignore_mp3_exists = getattr(self.red_options, 'ignore_mp3_exists', False)
+            if ignore_mp3_exists:
+                self.log_process(f"    [Pipeline] 正在进行 MP3 (320k/V0) 转码...")
+                process_mp3_album(album_dir, tracker_url, source_flag)
+
             # 3. 自动上传 (从本地 .json 恢复 Context)
             json_meta_path = None
             hash_str_lower = qb_torrent_info.get("hash", "").lower()
@@ -197,20 +190,37 @@ class PipelineManager:
             group_id = group_info['response']['group']['id']
             torrent_id = torrent_info.get('torrentId', torrent_info.get('id'))
             
-            # 构造原始 24bit 的链接
+            # 构造多个上传任务 (FLAC 16-bit, MP3 320, MP3 V0)
             source_link = f"{base_url}/torrents.php?id={group_id}&torrentid={torrent_id}"
-            release_desc = f"16-bit downsample created from the 24-bit source.\n\n[url={source_link}]24-bit source[/url]"
+            uploads = []
             
-            upload_data = {
-                'submit': 'true',
-                'type': '0', # Music
-                'groupid': str(group_id),
-                'format': 'FLAC',
-                'bitrate': 'Lossless',
-                'media': torrent_info.get('media', 'WEB'),
-                'release_desc': release_desc
-            }
-            
+            generated_torrent = album_dir.parent / f"{output_dir.name}.torrent"
+            if generated_torrent.exists():
+                uploads.append({
+                    'format': 'FLAC',
+                    'bitrate': 'Lossless',
+                    'desc_prefix': "16-bit downsample created from the 24-bit source.",
+                    'torrent_path': generated_torrent,
+                    'dir_name': output_dir.name
+                })
+            else:
+                self.log_main(_("log_no_generated_torrent").format(name=generated_torrent.name))
+                self._mark_failed(qb_torrent_info)
+                return
+                
+            if ignore_mp3_exists:
+                for fmt, bitrate in [("320", "320"), ("V0", "V0 (VBR)")]:
+                    mp3_dir_name = get_mp3_dir_name(album_dir.name, fmt)
+                    mp3_torrent = album_dir.parent / f"{mp3_dir_name}.torrent"
+                    if mp3_torrent.exists():
+                        uploads.append({
+                            'format': 'MP3',
+                            'bitrate': bitrate,
+                            'desc_prefix': f"MP3 {fmt} created from the 24-bit source.",
+                            'torrent_path': mp3_torrent,
+                            'dir_name': mp3_dir_name
+                        })
+
             # 携带 Remaster 信息以保持与原种子同一 Edition
             # 由于 search API 的 torrent_info 可能缺少 record label 等信息，我们需要从 group_info 里面找出对应的完整的 torrent 字典
             full_torrent_info = torrent_info
@@ -226,30 +236,21 @@ class PipelineManager:
                 bool(full_torrent_info.get('remasterRecordLabel')) or 
                 bool(full_torrent_info.get('remasterCatalogueNumber'))
             )
-
+            
+            remaster_data = {}
             if is_remastered:
-                upload_data['remaster'] = 'true'
-                
+                remaster_data['remaster'] = 'true'
                 r_year = full_torrent_info.get('remasterYear')
                 if not r_year:
                     r_year = group_info['response']['group'].get('year', '')
-                upload_data['remaster_year'] = str(r_year)
-                
-                upload_data['remaster_title'] = str(full_torrent_info.get('remasterTitle') or '')
-                
+                remaster_data['remaster_year'] = str(r_year)
+                remaster_data['remaster_title'] = str(full_torrent_info.get('remasterTitle') or '')
                 r_label = full_torrent_info.get('remasterRecordLabel') or group_info['response']['group'].get('recordLabel', '')
                 r_cat = full_torrent_info.get('remasterCatalogueNumber') or group_info['response']['group'].get('catalogueNumber', '')
-                
-                upload_data['remaster_record_label'] = str(r_label)
-                upload_data['remaster_catalogue_number'] = str(r_cat)
-                
-            generated_torrent = album_dir.parent / f"{output_dir.name}.torrent"
-            if not generated_torrent.exists():
-                self.log_main(_("log_no_generated_torrent").format(name=generated_torrent.name))
-                self._mark_failed(qb_torrent_info)
-                return
-                
-            # 执行上传
+                remaster_data['remaster_record_label'] = str(r_label)
+                remaster_data['remaster_catalogue_number'] = str(r_cat)
+
+            # 执行循环上传
             upload_url = f"{api_url}?action=upload"
             auth_key = self.red_options.api_key
             if site_config.get("source") == "OPS" and not auth_key.startswith("token "):
@@ -260,48 +261,65 @@ class PipelineManager:
                 'User-Agent': 'EliteTMHelper_AutoUpload'
             }
             
-            self.log_main(_("log_post_upload").format(source=site_config.get("source", "RED")))
-            with open(generated_torrent, 'rb') as f:
-                files = {'file_input': (generated_torrent.name, f, 'application/x-bittorrent')}
-                # 注意：requests 在传递 dict 到 data 时，不要将 headers 设为 multipart/form-data，requests 会自动处理 boundary
-                resp = requests.post(upload_url, headers=headers, data=upload_data, files=files, timeout=30)
-                
-            if resp.status_code == 200:
-                try:
-                    resp_json = resp.json()
-                    if resp_json.get('status') == 'success':
-                        new_torrent_id = resp_json['response'].get('torrentid') or resp_json['response'].get('torrentId')
-                        new_link = f"{base_url}/torrents.php?id={group_id}&torrentid={new_torrent_id}"
-                        self.log_main(_("log_upload_success"))
-                        self.log_main(_("log_new_torrent_link").format(link=new_link))
-                        
-                        # 成功上传后，必须从 RED 下载打上了官方 tracker passkey 和 source 标记的新种子
-                        self.log_main(_("log_dl_official_torrent").format(source=site_config.get("source", "RED")))
-                        dl_url = f"{api_url}?action=download&id={new_torrent_id}"
-                        dl_resp = requests.get(dl_url, headers=headers, timeout=30)
-                        
-                        if dl_resp.status_code == 200 and b'd8:announce' in dl_resp.content[:50]:
-                            official_torrent = album_dir.parent / f"{output_dir.name}_official.torrent"
-                            official_torrent.write_bytes(dl_resp.content)
+            for idx, up in enumerate(uploads):
+                if idx > 0:
+                    self.log_main("    [Pipeline] 等待 4 秒以防触发 API 频率限制...")
+                    time.sleep(4)
+                    
+                upload_data = {
+                    'submit': 'true',
+                    'type': '0', # Music
+                    'groupid': str(group_id),
+                    'format': up['format'],
+                    'bitrate': up['bitrate'],
+                    'media': torrent_info.get('media', 'WEB'),
+                    'release_desc': f"{up['desc_prefix']}\n\n[url={source_link}]24-bit source[/url]"
+                }
+                upload_data.update(remaster_data)
+
+                self.log_main(f"    [Pipeline] 正在发布: {up['dir_name']} ({up['format']} / {up['bitrate']})")
+                with open(up['torrent_path'], 'rb') as f:
+                    files = {'file_input': (up['torrent_path'].name, f, 'application/x-bittorrent')}
+                    resp = requests.post(upload_url, headers=headers, data=upload_data, files=files, timeout=30)
+                    
+                if resp.status_code == 200:
+                    try:
+                        resp_json = resp.json()
+                        if resp_json.get('status') == 'success':
+                            new_torrent_id = resp_json['response'].get('torrentid') or resp_json['response'].get('torrentId')
+                            new_link = f"{base_url}/torrents.php?id={group_id}&torrentid={new_torrent_id}"
+                            self.log_main(_("log_upload_success"))
+                            self.log_main(_("log_new_torrent_link").format(link=new_link))
                             
-                            self.log_process(_("log_add_official_to_qb"))
-                            self.qb.add_torrent(str(official_torrent), save_path=str(album_dir.parent), category="red_seeding")
+                            self.log_main(_("log_dl_official_torrent").format(source=site_config.get("source", "RED")))
+                            dl_url = f"{api_url}?action=download&id={new_torrent_id}"
+                            dl_resp = requests.get(dl_url, headers=headers, timeout=30)
+                            
+                            if dl_resp.status_code == 200 and b'd8:announce' in dl_resp.content[:50]:
+                                official_torrent = album_dir.parent / f"{up['dir_name']}_official.torrent"
+                                official_torrent.write_bytes(dl_resp.content)
+                                
+                                self.log_process(_("log_add_official_to_qb"))
+                                self.qb.add_torrent(str(official_torrent), save_path=str(album_dir.parent), category="red_seeding")
+                            else:
+                                self.log_main(_("log_dl_official_fail"))
+                                
                         else:
-                            self.log_main(_("log_dl_official_fail"))
-                            
-                        # 无论下载种子是否成功，上传都已经成功了，应该标记为 processed
-                        self._change_category(hash_str_lower, "red_processed")
-                            
-                    else:
-                        self.log_main(_("log_upload_api_fail").format(resp=resp_json))
-                        self._mark_failed(qb_torrent_info)
-                except Exception as e:
-                    self.log_main(_("log_upload_json_parse_fail").format(e=e, text=resp.text[:200]))
-                    self._mark_failed(qb_torrent_info)
-            else:
-                self.log_main(_("log_upload_http_fail").format(code=resp.status_code))
-                self.log_main(f"    [Pipeline] {resp.text[:500]}")
-                self._mark_failed(qb_torrent_info)
+                            self.log_main(_("log_upload_api_fail").format(resp=resp_json))
+                            if idx == 0: self._mark_failed(qb_torrent_info)
+                            break
+                    except Exception as e:
+                        self.log_main(_("log_upload_json_parse_fail").format(e=e, text=resp.text[:200]))
+                        if idx == 0: self._mark_failed(qb_torrent_info)
+                        break
+                else:
+                    self.log_main(_("log_upload_http_fail").format(code=resp.status_code))
+                    self.log_main(f"    [Pipeline] {resp.text[:500]}")
+                    if idx == 0: self._mark_failed(qb_torrent_info)
+                    break
+                    
+            # 全部上传循环结束后，无论后面 MP3 成功与否，只要处理完毕就标记为已处理。
+            self._change_category(hash_str_lower, "red_processed")
 
         except Exception as e:
             self.log_main(_("log_pipeline_exception").format(e=e))

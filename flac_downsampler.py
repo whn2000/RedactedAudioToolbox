@@ -75,6 +75,22 @@ def convert_to_16bit(input_path, output_path):
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **SUBPROCESS_KWARGS)
     return input_path.name
 
+def convert_to_mp3(input_path, output_path, is_v0=False):
+    """使用 ffmpeg 转换为 MP3，并保留所有元数据"""
+    cmd = [
+        'ffmpeg', '-i', str(input_path),
+        '-map', '0:a', '-map', '0:v?',    # 映射音频流和可能存在的视频流（封面图）
+        '-c:v', 'copy',                   # 复制封面图片，不重新编码
+        '-c:a', 'libmp3lame'
+    ]
+    if is_v0:
+        cmd.extend(['-q:a', '0'])
+    else:
+        cmd.extend(['-b:a', '320k'])
+    cmd.extend([str(output_path), '-y'])
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **SUBPROCESS_KWARGS)
+    return input_path.name
+
 
 def create_pt_torrent(source_dir, torrent_path, tracker_url, source_flag):
     """创建符合 PT 规范的私有种子"""
@@ -99,6 +115,16 @@ def get_16bit_dir_name(original_name: str) -> str:
             truncated = truncated[:-1].strip()
         return f"{truncated} (16bit)"
     return f"{original_name} (16bit)"
+
+def get_mp3_dir_name(original_name: str, fmt_name: str) -> str:
+    """获取 MP3 目录名称，限制长度以避免 RED 种子文件名过长报错"""
+    name_bytes = original_name.encode('utf-8')
+    if len(name_bytes) > 60:
+        truncated = name_bytes[:60].decode('utf-8', 'ignore').strip()
+        if truncated.endswith('-'):
+            truncated = truncated[:-1].strip()
+        return f"{truncated} ({fmt_name})"
+    return f"{original_name} ({fmt_name})"
 
 def process_album(input_path, tracker_url, source_flag):
     """处理单张专辑的逻辑"""
@@ -185,6 +211,71 @@ def process_album(input_path, tracker_url, source_flag):
     # 在同级目录生成种子
     torrent_file = input_path.parent / f"{output_path.name}.torrent"
     create_pt_torrent(output_path, torrent_file, tracker_url, source_flag)
+
+def process_mp3_album(input_path, tracker_url, source_flag):
+    """处理单张专辑转码为 MP3 (320k 和 V0) 的逻辑"""
+    flac_files = list(input_path.glob('**/*.flac'))
+    if not flac_files:
+        print(f"  -> ⚠️ 未找到 FLAC 文件，跳过 MP3 转换。")
+        return
+
+    formats = [("320", False), ("V0", True)]
+    
+    for fmt_name, is_v0 in formats:
+        output_dir_name = get_mp3_dir_name(input_path.name, fmt_name)
+        output_path = input_path.parent / output_dir_name
+        output_path.mkdir(exist_ok=True)
+        print(f"  -> 输出 MP3 {fmt_name} 目录: {output_path.name}")
+        
+        conversion_tasks = []
+        copy_tasks = []
+
+        for item in input_path.glob('**/*'):
+            rel_path = item.relative_to(input_path)
+            parts = list(rel_path.parts)
+            if not item.is_dir():
+                filename = parts[-1]
+                folder_len = len(output_path.name.encode('utf-8'))
+                subdirs_len = sum(len(p.encode('utf-8')) + 1 for p in parts[:-1])
+                allowed_filename_bytes = 170 - folder_len - subdirs_len - 1
+                if allowed_filename_bytes < 20: 
+                    allowed_filename_bytes = 20
+                
+                filename_bytes = filename.encode('utf-8')
+                if len(filename_bytes) > allowed_filename_bytes:
+                    ext = ".mp3" if item.suffix.lower() == '.flac' else item.suffix
+                    ext_bytes = ext.encode('utf-8')
+                    base_len = allowed_filename_bytes - len(ext_bytes)
+                    safe_base = filename_bytes[:base_len].decode('utf-8', 'ignore').strip()
+                    parts[-1] = safe_base + ext
+                else:
+                    if item.suffix.lower() == '.flac':
+                        parts[-1] = Path(filename).stem + ".mp3"
+
+            target_item = output_path.joinpath(*parts)
+
+            if item.is_dir():
+                target_item.mkdir(exist_ok=True)
+                continue
+                
+            if item.suffix.lower() == '.flac':
+                conversion_tasks.append((item, target_item))
+            else:
+                copy_tasks.append((item, target_item))
+
+        for src, dst in copy_tasks:
+            shutil.copy2(src, dst)
+
+        if conversion_tasks:
+            print(f"  -> 正在并发转换 {len(conversion_tasks)} 个 {fmt_name} MP3 文件...")
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future_to_file = {executor.submit(convert_to_mp3, src, dst, is_v0): src for src, dst in conversion_tasks}
+                for future in concurrent.futures.as_completed(future_to_file):
+                    filename = future.result()
+                    
+        print(f"  -> {fmt_name} MP3 音频处理完成。")
+        torrent_file = input_path.parent / f"{output_path.name}.torrent"
+        create_pt_torrent(output_path, torrent_file, tracker_url, source_flag)
 
 
 def process_batch(base_dir, tracker_url, source_flag):

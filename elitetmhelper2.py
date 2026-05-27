@@ -244,6 +244,14 @@ class FoundTorrent:
                 return True
         return False
 
+    def missing_mp3(self):
+        for torrent in self.torrents:
+            if get_edition(torrent) == self.edition:
+                enc = torrent.get("encoding", "")
+                if enc == "320" or enc == "V0 (VBR)":
+                    return False
+        return True
+
 def search_result_iterator(session, options, found, abort_flag):
     year = int(options.year_latest)
     
@@ -514,6 +522,7 @@ def perform_search(options, abort_flag):
             if this_torrent.is_24_bit():
                 nope = [""]
                 if options.any16bit and this_torrent.any_16_bit(): nope.append(" 16")
+                if getattr(options, 'ignore_mp3_exists', False) and not this_torrent.missing_mp3(): nope.append(" mp3_exists")
                 if options.bandcamp and not this_torrent.bandcamp(): nope.append(" bc")
                 if options.trumpable and this_torrent.trump_status: nope.append(" tr")
                 if options.lossy and this_torrent.lossy_status: nope.append(" lo")
@@ -521,6 +530,7 @@ def perform_search(options, abort_flag):
                 if options.min_seeders and this_torrent.seeders < options.min_seeders: nope.append(" sd")
                 if options.exclude_zero_snatches and this_torrent.snatched == 0: nope.append(" 0snatches")
                 if options.max_size and torrent.get("size", 0) > options.max_size: nope.append(" >max_size")
+                if getattr(options, 'min_size', 0) > 0 and torrent.get("size", 0) < options.min_size: nope.append(" <min_size")
 
                 if nope == [""]:
                     found += 1
@@ -660,11 +670,13 @@ class AppGUI:
         self.year_earliest_var = tk.StringVar(value="1970")
         self.number_var = tk.StringVar(value="50")
         self.max_size_var = tk.StringVar(value="2048")
+        self.min_size_var = tk.StringVar(value="0")
         self.order_by_var = tk.StringVar(value="time")
         
         self.bandcamp_var = tk.BooleanVar(value=False)
         self.ignore_lossy_var = tk.BooleanVar(value=False)
         self.ignore_16bit_var = tk.BooleanVar(value=False)
+        self.ignore_mp3_exists_var = tk.BooleanVar(value=False)
         self.ignore_trumpable_var = tk.BooleanVar(value=False)
         self.album_var = tk.BooleanVar(value=True)
         self.soundtrack_var = tk.BooleanVar(value=True)
@@ -726,10 +738,12 @@ class AppGUI:
             'year_earliest': self.year_earliest_var.get(),
             'number': self.number_var.get(),
             'max_size': self.max_size_var.get(),
+            'min_size': self.min_size_var.get(),
             'order_by': self.order_by_var.get(),
             'bandcamp': self.bandcamp_var.get(),
             'ignore_lossy': self.ignore_lossy_var.get(),
             'ignore_16bit': self.ignore_16bit_var.get(),
+            'ignore_mp3_exists': self.ignore_mp3_exists_var.get(),
             'ignore_trumpable': self.ignore_trumpable_var.get(),
             'album': self.album_var.get(),
             'soundtrack': self.soundtrack_var.get(),
@@ -766,10 +780,12 @@ class AppGUI:
         if 'year_earliest' in config: self.year_earliest_var.set(config['year_earliest'])
         if 'number' in config: self.number_var.set(config['number'])
         if 'max_size' in config: self.max_size_var.set(config['max_size'])
+        if 'min_size' in config: self.min_size_var.set(config['min_size'])
         if 'order_by' in config: self.order_by_var.set(config['order_by'])
         if 'bandcamp' in config: self.bandcamp_var.set(config['bandcamp'])
         if 'ignore_lossy' in config: self.ignore_lossy_var.set(config['ignore_lossy'])
         if 'ignore_16bit' in config: self.ignore_16bit_var.set(config['ignore_16bit'])
+        if 'ignore_mp3_exists' in config: self.ignore_mp3_exists_var.set(config['ignore_mp3_exists'])
         if 'ignore_trumpable' in config: self.ignore_trumpable_var.set(config['ignore_trumpable'])
         if 'album' in config: self.album_var.set(config['album'])
         if 'soundtrack' in config: self.soundtrack_var.set(config['soundtrack'])
@@ -968,12 +984,15 @@ class AppGUI:
         ctk.CTkLabel(config_frame, text=_("max_size_mb")).grid(row=4, column=2, sticky=tk.W, pady=5, padx=5)
         ctk.CTkEntry(config_frame, textvariable=self.max_size_var, width=120).grid(row=4, column=3, sticky=tk.W, padx=5)
 
-        ctk.CTkLabel(config_frame, text=_("req_interval")).grid(row=5, column=0, sticky=tk.W, pady=5, padx=5)
-        ctk.CTkEntry(config_frame, textvariable=self.request_interval_var, width=120).grid(row=5, column=1, sticky=tk.W, padx=5)
+        ctk.CTkLabel(config_frame, text="最小体积 (MB)").grid(row=5, column=0, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkEntry(config_frame, textvariable=self.min_size_var, width=120).grid(row=5, column=1, sticky=tk.W, padx=5)
 
-        ctk.CTkLabel(config_frame, text=_("save_path")).grid(row=6, column=0, sticky=tk.W, pady=5, padx=5)
-        ctk.CTkEntry(config_frame, textvariable=self.save_path_var, width=300).grid(row=6, column=1, columnspan=2, sticky=tk.W, padx=5)
-        ctk.CTkButton(config_frame, text=_("browse"), command=self.browse_save_path, width=80).grid(row=6, column=3, sticky=tk.W, padx=5)
+        ctk.CTkLabel(config_frame, text=_("req_interval")).grid(row=6, column=0, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkEntry(config_frame, textvariable=self.request_interval_var, width=120).grid(row=6, column=1, sticky=tk.W, padx=5)
+
+        ctk.CTkLabel(config_frame, text=_("save_path")).grid(row=7, column=0, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkEntry(config_frame, textvariable=self.save_path_var, width=300).grid(row=7, column=1, columnspan=2, sticky=tk.W, padx=5)
+        ctk.CTkButton(config_frame, text=_("browse"), command=self.browse_save_path, width=80).grid(row=7, column=3, sticky=tk.W, padx=5)
 
         filter_frame = ctk.CTkFrame(self.scrollable_frame)
         filter_frame.pack(fill=tk.X, padx=5, pady=5)
@@ -982,12 +1001,13 @@ class AppGUI:
         ctk.CTkCheckBox(filter_frame, text=_("nyp_only"), variable=self.bandcamp_var).grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
         ctk.CTkCheckBox(filter_frame, text=_("ignore_lossy"), variable=self.ignore_lossy_var).grid(row=1, column=1, sticky=tk.W, padx=5, pady=5)
         ctk.CTkCheckBox(filter_frame, text=_("ignore_16bit"), variable=self.ignore_16bit_var).grid(row=1, column=2, sticky=tk.W, padx=5, pady=5)
-        ctk.CTkCheckBox(filter_frame, text=_("ignore_trumpable"), variable=self.ignore_trumpable_var).grid(row=1, column=3, sticky=tk.W, padx=5, pady=5)
-        ctk.CTkCheckBox(filter_frame, text=_("excl_0_snatches"), variable=self.exclude_zero_snatches_var).grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
-        ctk.CTkCheckBox(filter_frame, text=_("auto_dl_torrent"), variable=self.auto_download_var).grid(row=2, column=1, sticky=tk.W, padx=5, pady=5)
+        ctk.CTkCheckBox(filter_frame, text="忽略已有 MP3", variable=self.ignore_mp3_exists_var).grid(row=1, column=3, sticky=tk.W, padx=5, pady=5)
+        ctk.CTkCheckBox(filter_frame, text=_("ignore_trumpable"), variable=self.ignore_trumpable_var).grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+        ctk.CTkCheckBox(filter_frame, text=_("excl_0_snatches"), variable=self.exclude_zero_snatches_var).grid(row=2, column=1, sticky=tk.W, padx=5, pady=5)
+        ctk.CTkCheckBox(filter_frame, text=_("auto_dl_torrent"), variable=self.auto_download_var).grid(row=2, column=2, sticky=tk.W, padx=5, pady=5)
 
         min_seeders_frame = ctk.CTkFrame(filter_frame, fg_color="transparent")
-        min_seeders_frame.grid(row=2, column=2, columnspan=2, sticky=tk.W, padx=5, pady=5)
+        min_seeders_frame.grid(row=2, column=3, sticky=tk.W, padx=5, pady=5)
         ctk.CTkLabel(min_seeders_frame, text=_("min_seeders")).pack(side=tk.LEFT, padx=(0, 5))
         ctk.CTkEntry(min_seeders_frame, textvariable=self.min_seeders_var, width=60).pack(side=tk.LEFT)
 
@@ -1098,6 +1118,8 @@ class AppGUI:
             trumpable=self.ignore_trumpable_var.get(),
             uns=False,
             max_size=self._safe_int(self.max_size_var, 2048) * 1048576,
+            min_size=self._safe_int(self.min_size_var, 0) * 1048576,
+            ignore_mp3_exists=self.ignore_mp3_exists_var.get(),
             media=self.media_var.get() if self.media_var.get() else "",
             min_seeders=self._safe_int(self.min_seeders_var, 0),
             order_by=self.order_by_var.get(),
