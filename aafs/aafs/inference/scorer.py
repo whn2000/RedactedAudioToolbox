@@ -32,11 +32,14 @@ class SimpleScorer:
                     reasons.append(ev.description)
                     
         # 最终决定
+        is_mqa = any(ev.name == "mqa_detected" for ev in evidences)
         is_fake_hi_res = fake_hi_res_score > 0.6
         is_fake_lossless = fake_lossless_score > 0.6
         
         classification = "genuine"
-        if is_fake_lossless:
+        if is_mqa:
+            classification = "MQA encoded (lossy)"
+        elif is_fake_lossless:
             classification = "fake_lossless (transcoded)"
         elif is_fake_hi_res:
             classification = "fake_hi_res (upsampled / padded)"

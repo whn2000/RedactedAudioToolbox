@@ -7,6 +7,8 @@ import shutil
 import json
 import concurrent.futures
 
+LOSSLESS_EXTENSIONS = {'.flac', '.m4a', '.alac', '.ape', '.wav', '.aiff', '.aif', '.wv', '.tta'}
+
 if os.name == 'nt':
     SUBPROCESS_KWARGS = {'creationflags': 0x08000000}
 else:
@@ -67,6 +69,7 @@ def convert_to_16bit(input_path, output_path):
         'ffmpeg', '-i', str(input_path),
         '-map', '0:a', '-map', '0:v?',    # 映射音频流和可能存在的视频流（封面图）
         '-c:v', 'copy',                   # 复制封面图片，不重新编码
+        '-c:a', 'flac',                   # 强制编码为 flac
         '-sample_fmt', 's16',             # 强制转换为 16bit
         '-ar', '44100',                   # 统一重采样为 44.1kHz (若想保留原采样率，请将此行注释掉)
         '-compression_level', '8',        # FLAC 最高压缩率
@@ -128,23 +131,25 @@ def get_mp3_dir_name(original_name: str, fmt_name: str) -> str:
 
 def process_album(input_path, tracker_url, source_flag):
     """处理单张专辑的逻辑"""
-    flac_files = list(input_path.glob('**/*.flac'))
-    if not flac_files:
-        print(f"  -> ⚠️ 未找到 FLAC 文件，跳过。")
+    audio_files = [f for f in input_path.glob('**/*') if f.is_file() and f.suffix.lower() in LOSSLESS_EXTENSIONS]
+    if not audio_files:
+        print(f"  -> ⚠️ 未找到无损音频文件，跳过。")
         return
 
-    # 检查是否包含 24bit 文件 (并发检查)
+    # 检查是否包含 24bit 文件或非FLAC文件 (并发检查)
     needs_conversion = False
+    needs_flac_encode = False
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = {executor.submit(get_audio_info, flac): flac for flac in flac_files}
+        futures = {executor.submit(get_audio_info, f): f for f in audio_files}
         for future in concurrent.futures.as_completed(futures):
+            f = futures[future]
             if future.result() > 16:
                 needs_conversion = True
-                # 不要 break，必须让已经启动的 future 跑完或者取消
-                # concurrent.futures 不太好取消，所以就让它们跑完
+            if f.suffix.lower() != '.flac':
+                needs_flac_encode = True
 
-    if not needs_conversion:
-        print(f"  -> ⏭️ 已经是 16bit 或以下，跳过转换。")
+    if not needs_conversion and not needs_flac_encode:
+        print(f"  -> ⏭️ 已经是 16bit FLAC，跳过转换。")
         return
 
     # 创建输出目录，并限制长度
@@ -172,11 +177,14 @@ def process_album(input_path, tracker_url, source_flag):
                 
             filename_bytes = filename.encode('utf-8')
             if len(filename_bytes) > allowed_filename_bytes:
-                ext = item.suffix
+                ext = '.flac' if item.suffix.lower() in LOSSLESS_EXTENSIONS else item.suffix
                 ext_bytes = ext.encode('utf-8')
                 base_len = allowed_filename_bytes - len(ext_bytes)
                 safe_base = filename_bytes[:base_len].decode('utf-8', 'ignore').strip()
                 parts[-1] = safe_base + ext
+            else:
+                if item.suffix.lower() in LOSSLESS_EXTENSIONS:
+                    parts[-1] = Path(filename).stem + ".flac"
 
         target_item = output_path.joinpath(*parts)
 
@@ -184,9 +192,9 @@ def process_album(input_path, tracker_url, source_flag):
             target_item.mkdir(exist_ok=True)
             continue
             
-        if item.suffix.lower() == '.flac':
+        if item.suffix.lower() in LOSSLESS_EXTENSIONS:
             bits = get_audio_info(item)
-            if bits > 16:
+            if bits > 16 or item.suffix.lower() != '.flac':
                 conversion_tasks.append((item, target_item))
             else:
                 copy_tasks.append((item, target_item))
@@ -214,13 +222,21 @@ def process_album(input_path, tracker_url, source_flag):
 
 def process_mp3_album(input_path, tracker_url, source_flag):
     """处理单张专辑转码为 MP3 (320k 和 V0) 的逻辑"""
-    flac_files = list(input_path.glob('**/*.flac'))
-    if not flac_files:
-        print(f"  -> ⚠️ 未找到 FLAC 文件，跳过 MP3 转换。")
+    process_mp3_album_with_options(input_path, tracker_url, source_flag, mp3_320=True, mp3_v0=True)
+
+def process_mp3_album_with_options(input_path, tracker_url, source_flag, mp3_320=True, mp3_v0=True):
+    """处理单张专辑转码为指定 MP3 格式的逻辑"""
+    audio_files = [item for item in input_path.glob('**/*') if item.is_file() and item.suffix.lower() in LOSSLESS_EXTENSIONS]
+    if not audio_files:
+        print(f"  -> ⚠️ 未找到无损音频文件，跳过 MP3 转换。")
         return
 
-    formats = [("320", False), ("V0", True)]
-    
+    formats = []
+    if mp3_320:
+        formats.append(("320", False))
+    if mp3_v0:
+        formats.append(("V0", True))
+        
     for fmt_name, is_v0 in formats:
         output_dir_name = get_mp3_dir_name(input_path.name, fmt_name)
         output_path = input_path.parent / output_dir_name
@@ -243,13 +259,13 @@ def process_mp3_album(input_path, tracker_url, source_flag):
                 
                 filename_bytes = filename.encode('utf-8')
                 if len(filename_bytes) > allowed_filename_bytes:
-                    ext = ".mp3" if item.suffix.lower() == '.flac' else item.suffix
+                    ext = ".mp3" if item.suffix.lower() in LOSSLESS_EXTENSIONS else item.suffix
                     ext_bytes = ext.encode('utf-8')
                     base_len = allowed_filename_bytes - len(ext_bytes)
                     safe_base = filename_bytes[:base_len].decode('utf-8', 'ignore').strip()
                     parts[-1] = safe_base + ext
                 else:
-                    if item.suffix.lower() == '.flac':
+                    if item.suffix.lower() in LOSSLESS_EXTENSIONS:
                         parts[-1] = Path(filename).stem + ".mp3"
 
             target_item = output_path.joinpath(*parts)
@@ -258,7 +274,7 @@ def process_mp3_album(input_path, tracker_url, source_flag):
                 target_item.mkdir(exist_ok=True)
                 continue
                 
-            if item.suffix.lower() == '.flac':
+            if item.suffix.lower() in LOSSLESS_EXTENSIONS:
                 conversion_tasks.append((item, target_item))
             else:
                 copy_tasks.append((item, target_item))
@@ -279,7 +295,11 @@ def process_mp3_album(input_path, tracker_url, source_flag):
 
 
 def process_batch(base_dir, tracker_url, source_flag):
-    """遍历总文件夹下的每一张专辑并分别处理"""
+    """遍历总文件夹下的每一张专辑并分别处理 (默认仅 16bit FLAC)"""
+    process_batch_with_options(base_dir, tracker_url, source_flag, flac_out=True, mp3_320_out=False, mp3_v0_out=False)
+
+def process_batch_with_options(base_dir, tracker_url, source_flag, flac_out=True, mp3_320_out=False, mp3_v0_out=False):
+    """遍历总文件夹下的每一张专辑并分别处理指定的格式"""
     check_dependencies()
     
     base_path = Path(base_dir).resolve()
@@ -292,13 +312,20 @@ def process_batch(base_dir, tracker_url, source_flag):
     # 遍历第一层子目录 (识别为独立的专辑)
     for album_dir in base_path.iterdir():
         if album_dir.is_dir():
-            # 过滤掉已经生成过的 (16bit) 文件夹，防止无限套娃
-            if album_dir.name.endswith("(16bit)"):
+            # 过滤已生成格式目录，防止无限循环
+            if album_dir.name.endswith("(16bit)") or album_dir.name.endswith("(320)") or album_dir.name.endswith("(V0)"):
                 continue
                 
             print(f"{'-'*60}")
             print(f"💿 正在检查专辑: {album_dir.name}")
-            process_album(album_dir, tracker_url, source_flag)
+            
+            # 1. 16-bit FLAC conversion
+            if flac_out:
+                process_album(album_dir, tracker_url, source_flag)
+                
+            # 2. MP3 conversion
+            if mp3_320_out or mp3_v0_out:
+                process_mp3_album_with_options(album_dir, tracker_url, source_flag, mp3_320_out, mp3_v0_out)
 
     print(f"\n{'='*60}\n🎉 所有扫描与处理任务已完成！")
 
@@ -312,11 +339,13 @@ class RedirectText:
         self.output = text_ctrl
 
     def write(self, string):
-        try:
-            self.output.insert(tk.END, string)
-            self.output.see(tk.END)
-        except Exception:
-            pass
+        def _write():
+            try:
+                self.output.insert(tk.END, string)
+                self.output.see(tk.END)
+            except Exception:
+                pass
+        self.output.after(0, _write)
 
     def flush(self):
         pass
@@ -329,6 +358,10 @@ class FlacDownsamplerGUI:
         self.input_dir_var = tk.StringVar()
         self.tracker_var = tk.StringVar()
         self.source_var = tk.StringVar()
+
+        self.output_flac_var = tk.BooleanVar(value=True)
+        self.output_320_var = tk.BooleanVar(value=False)
+        self.output_v0_var = tk.BooleanVar(value=False)
 
         self.build_ui()
 
@@ -349,6 +382,13 @@ class FlacDownsamplerGUI:
 
         ctk.CTkLabel(config_frame, text=_("source_flag")).grid(row=3, column=0, sticky=tk.W, pady=5, padx=5)
         ctk.CTkEntry(config_frame, textvariable=self.source_var, width=200).grid(row=3, column=1, sticky=tk.W, padx=5)
+
+        ctk.CTkLabel(config_frame, text="输出格式 (Formats)").grid(row=4, column=0, sticky=tk.W, pady=5, padx=5)
+        formats_frame = ctk.CTkFrame(config_frame, fg_color="transparent")
+        formats_frame.grid(row=4, column=1, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkCheckBox(formats_frame, text="16-bit FLAC", variable=self.output_flac_var, width=100).pack(side=tk.LEFT, padx=5)
+        ctk.CTkCheckBox(formats_frame, text="MP3 320k", variable=self.output_320_var, width=100).pack(side=tk.LEFT, padx=5)
+        ctk.CTkCheckBox(formats_frame, text="MP3 V0", variable=self.output_v0_var, width=100).pack(side=tk.LEFT, padx=5)
 
         btn_frame = ctk.CTkFrame(self.scrollable_frame, fg_color="transparent")
         btn_frame.pack(fill=tk.X, padx=5, pady=10)
@@ -373,6 +413,10 @@ class FlacDownsamplerGUI:
             tk.messagebox.showwarning("提示", "请填写完整的输入目录和 Tracker URL！")
             return
             
+        if not (self.output_flac_var.get() or self.output_320_var.get() or self.output_v0_var.get()):
+            tk.messagebox.showwarning("提示", "请选择至少一个输出格式！")
+            return
+            
         self.start_btn.configure(state=tk.DISABLED)
         self.log_text.delete(1.0, tk.END)
         
@@ -382,8 +426,15 @@ class FlacDownsamplerGUI:
         old_stdout = sys.stdout
         sys.stdout = RedirectText(self.log_text)
         try:
-            print(">>> 正在启动 FLAC 降频与制种任务...\n")
-            process_batch(self.input_dir_var.get(), self.tracker_var.get(), self.source_var.get())
+            print(">>> 正在启动多格式转码与制种任务...\n")
+            process_batch_with_options(
+                self.input_dir_var.get(),
+                self.tracker_var.get(),
+                self.source_var.get(),
+                self.output_flac_var.get(),
+                self.output_320_var.get(),
+                self.output_v0_var.get()
+            )
         except Exception as e:
             print(f"\n❌ [错误]: {str(e)}")
         finally:

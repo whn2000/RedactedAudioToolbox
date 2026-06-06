@@ -21,16 +21,18 @@
 
 ## 🇬🇧 English
 
-**Redacted Audio Toolbox** is a feature-rich, multi-tab desktop application built with Python and [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter). Designed for music enthusiasts and Private Tracker (PT) users on sites like **Redacted (RED)** and **Orpheus (OPS)**, it provides a complete workflow — from discovering 24-bit FLAC torrents to downsampling, spectrogram verification, quality auditing, and automated seeding.
+**Redacted Audio Toolbox** is a feature-rich, multi-tab desktop application built with Python and [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter). Designed for music enthusiasts and Private Tracker (PT) users on sites like **Redacted (RED)** and **Orpheus (OPS)**, it provides a complete workflow — from discovering 24-bit FLAC torrents to multi-format downsampling, spectrogram verification, EAC/XLD log auditing with PCM CRC matching, advanced MQA / wasted bits detection, and automated local or remote seeding.
 
 ### ✨ Key Features
 
 | Tab | Feature | Description |
 |-----|---------|-------------|
 | 🔍 **Search** | 24-bit FLAC Finder | Discover and filter 24-bit FLAC torrents via Redacted / OPS API |
-| 🔽 **Downsample** | FLAC Batch Converter | Convert 24-bit FLAC → 16-bit/44.1kHz with automatic `.torrent` creation |
-| 📊 **Check** | Lossless / Hi-Res Checker | Verify audio authenticity using SoX spectrograms |
-| 🏅 **Audit** | Quality Audit | AI-powered audio quality scoring system |
+| 🔽 **Downsample** | Multi-Format Transcoder | Batch convert 24-bit FLAC → 16-bit FLAC / MP3 320k / MP3 V0 in one click |
+| 📊 **Check** | Lossless & Log Auditor | Verify audio via SoX spectrograms, parse EAC/XLD logs, and match PCM CRC32 |
+| 🏅 **Audit** | Quality Audit | AI-powered audio quality risk assessment scoring system |
+| 🚀 **AAFS** | Advanced Feature Suite | Detect MQA syncwords and wasted bits upconvert anomalies |
+| 🌐 **Seeding** | Client & Remote Support | Seed to qBittorrent / Transmission locally or to remote Seedbox via rclone |
 
 ---
 
@@ -51,29 +53,40 @@ Automates the discovery and downloading of 24-bit FLAC torrents from Redacted (R
 - **Auto-download**: Directly download matched `.torrent` files to a specified directory
 - **Result caching**: Avoids re-processing previously seen torrents across sessions
 
-### 🔽 Tab 2: FLAC Downsampler & Torrent Creator
+---
 
-Batch-processes directories of 24-bit FLAC albums for PT seeding.
+### 🔽 Tab 2: FLAC Downsampler & Multi-Format Creator
 
-- **Concurrent processing**: Multi-threaded FFmpeg conversion (configurable thread count)
-- **Intelligent downsampling**: 24-bit → 16-bit with sample rate conversion to 44.1kHz/48kHz as needed
-- **Metadata preservation**: All FLAC tags and embedded cover art are retained
-- **Automatic torrent creation**: Generates PT-compliant `.torrent` files using `torf` with correct tracker announce URL and source tag
-- **Folder scanning**: Recursively discovers albums from a root directory
-- **Skip logic**: Automatically skips albums that are already 16-bit
+Batch-processes directories of 24-bit FLAC albums for PT seeding with one-click multi-format support.
 
-### 📊 Tab 3: Lossless / Hi-Res Checker
+- **Multi-Format Selection**: Support choosing any combination of:
+  - `16-bit FLAC` (standard downsampling with dither/resampling)
+  - `MP3 320k` (high quality CBR MP3)
+  - `MP3 V0` (high quality VBR MP3)
+- **Concurrent processing**: Multi-threaded conversion (configurable thread count)
+- **Metadata preservation**: All FLAC tags, embedded cover art, and comments are fully preserved
+- **Automatic torrent creation**: Generates PT-compliant `.torrent` files using `torf` with correct tracker announce URL and source tag for each chosen format
+- **Smart skip logic**: Automatically skips folders that are already 16-bit FLAC or already transcoded
 
-Generates and analyzes audio spectrograms to determine audio authenticity.
+---
+
+### 📊 Tab 3: Lossless / Hi-Res Checker & Log Auditor
+
+Generates audio spectrograms and parses ripping logs to determine authenticity.
 
 - **SoX-powered spectrogram generation**: Creates detailed frequency analysis images for each track
-- **Automatic stitching**: Combines individual track spectrograms into a single panoramic album image for easy reporting
-- **Intelligent analysis**: Detects frequency cutoff points to classify audio as:
-  - ✅ True Lossless
-  - ⚠️ Fake Lossless (lossy source transcoded to FLAC)
-  - ⚠️ Fake Hi-Res (upsampled from 16-bit/44.1kHz)
-- **Batch processing**: Analyze entire albums at once
-- **Visual output**: Generated spectrograms can be saved for upload to PT forums
+- **Automatic stitching**: Combines individual track spectrograms into a single panoramic album image
+- **Intelligent analysis**: Detects frequency cutoff points to classify audio as True Lossless, Fake Lossless (transcoded), or Fake Hi-Res (upsampled)
+- **EAC / XLD Log parsing**:
+  - Automatically scans for `.log` files in the album directory
+  - Extracts and verifies rip log Checksum to check if the log has been modified/tampered with
+  - Extracts individual track Test and Copy CRCs
+- **PCM CRC32 Verification**:
+  - Decodes FLAC audio tracks to raw 16-bit / 44.1kHz stereo PCM streams in the background
+  - Calculates the raw PCM CRC32 hash and matches it track-by-track against the log
+  - Confirms the audio data exactly matches the rip log
+
+---
 
 ### 🏅 Tab 4: Quality Audit
 
@@ -82,7 +95,7 @@ Modular, plugin-based audio quality risk assessment framework with a 0–100 sco
 - **10 built-in risk rules** (plugin architecture — zero-registration auto-discovery):
   - Frequency cutoff analysis (22kHz threshold)
   - Fake Hi-Res detection (upsampled content)
-  - MP3 transcode artifact detection (128k/192k/256k/320k signature frequencies)
+  - MP3 transcode signature detection (128k/192k/256k/320k signature frequencies)
   - Spectrogram gap detection
   - Suspicious channel similarity (identical L/R channels)
   - Sharp high-frequency rolloff detection
@@ -90,25 +103,32 @@ Modular, plugin-based audio quality risk assessment framework with a 0–100 sco
   - AccurateRip verification failure
   - Missing rip log penalty (CD sources)
   - WEB source trust bonus
-- **EAC / XLD log analysis**: Parses ripping logs, deducts points for insecure read mode, offset errors, CRC mismatches, read errors, etc.
 - **Duplicate & trump detection**: Compares against existing releases by format, bitrate, source, log quality, and bit depth
 - **BBCode description generator**: Auto-generates formatted upload descriptions with risk notices and spectrogram embeds
 - **Feature caching**: MD5-based cache for extracted audio features (configurable TTL)
-- **Risk levels**: SAFE → LOW_RISK → SUSPICIOUS → HIGH_RISK → LIKELY_TRANSCODE
 - **Per-rule breakdown**: Color-coded display of each triggered rule with score delta and explanation
 
-### 🔄 Automation Pipeline
+---
 
-The integrated **Pipeline Manager** connects all tabs into a fully automated workflow:
+### 🚀 Tab 5 / AAFS: Advanced Audio Feature Suite
 
-```
-Search → Download → qBittorrent → Convert (24bit→16bit) → Check (Spectrogram) → Create Torrent → Seed
-```
+A specialized analytical layer to detect modern hidden anomalies in high-resolution audio.
 
-- **qBittorrent integration**: Monitors download completion via qBittorrent Web API
-- **Automatic chaining**: When a download completes, automatically triggers conversion and spectrogram checking
-- **Manual confirmation**: Optionally prompts for manual review before proceeding to upload
-- **Background operation**: Pipeline runs in a separate thread, allowing you to continue using the app
+- **MQA Syncword Detection**:
+  - Decodes audio files and performs correlation analysis to scan for the MQA syncword marker (`0xbe1788`).
+  - Identifies if a high-resolution FLAC file is actually MQA-encoded or contains MQA remnants.
+- **Wasted Bits Upconvert Detection**:
+  - Analyzes whether a 24-bit audio file contains "wasted bits" (i.e. the lower bits are padded with zeros).
+  - Utilizes `flac -ac` (or native bitwise check) to detect files that were artificially upconverted from 16-bit to 24-bit without extra detail.
+
+---
+
+### 🌐 Cross-Seed & Remote Seeding Client Support
+
+- **Seeding Client Integration**: Supports local injection into **qBittorrent** and **Transmission** client.
+- **Remote Seeding (rclone)**:
+  - Automates uploading the newly transcoded folder/torrent to a remote Seedbox via `rclone` subprocess calls.
+  - Automatically adds the uploaded torrent to your remote client (qBittorrent/Transmission) for immediate seeding.
 
 ---
 
@@ -116,133 +136,26 @@ Search → Download → qBittorrent → Convert (24bit→16bit) → Check (Spect
 
 #### Method 1: Standalone Executable (Recommended for Windows)
 
-1. Download `RedactedAudioToolbox.exe` from the [Releases](https://github.com/whn2000/RedactedAudioToolbox/releases) page
+1. Download `RedactedAudioToolbox.exe` from the `release` folder (or Releases page)
 2. Double-click to run — no Python installation required!
-3. On first launch, the built-in **Dependency Manager** will automatically download and configure `ffmpeg` and `sox` for you
+3. On first launch, the built-in **Dependency Manager** will automatically configure `ffmpeg` and `sox` for you
 
 #### Method 2: Run from Source
 
 **Prerequisites:**
 - Python 3.8+
-- Windows OS (DPI awareness and some path handling are Windows-specific)
+- Windows OS (DPI awareness and path handling are Windows-specific)
 
 ```bash
 # 1. Clone the repository
 git clone https://github.com/whn2000/RedactedAudioToolbox.git
 cd RedactedAudioToolbox
 
-# 2. Install Python dependencies
-pip install requests pillow torf customtkinter
+# 2. Install dependencies
+pip install requests pillow torf customtkinter soundfile numpy scipy transmission-rpc
 
 # 3. Run the application
 python main.py
-```
-
-**External dependencies** (auto-managed on first run):
-- [FFmpeg](https://ffmpeg.org/) — audio conversion
-- [SoX](https://sox.sourceforge.net/) — spectrogram generation
-
----
-
-### 🛠️ Configuration
-
-All settings are persisted in `config.json` in the application directory.
-
-#### Configuration Structure
-
-```jsonc
-{
-  "site": "RED",                    // Active site: "RED" or "OPS"
-  "global": {
-    "qb_host": "http://127.0.0.1", // qBittorrent Web UI host
-    "qb_port": "8080",             // qBittorrent Web UI port
-    "qb_user": "admin",            // qBittorrent username
-    "qb_pass": "adminadmin",       // qBittorrent password
-    "enable_pipeline": false        // Enable automation pipeline
-  },
-  "sites": {
-    "RED": {
-      "api_key": "",               // RED API key (Settings → API Keys → New Key)
-      "save_path": "",             // Torrent file save directory
-      "buffer_formula": "(U / 0.65) - D", // Buffer calculation formula
-      "media": "CD",               // Media filter
-      "year_latest": "2025",       // End year for search
-      "year_earliest": "1970",     // Start year for search
-      "number": "50",              // Target number of torrents to find
-      "max_size": "2048",          // Max torrent size (MB)
-      "order_by": "time",          // Sort order: time/size/snatched/seeders/random
-      "ignore_lossy": false,       // Skip lossy-approved torrents
-      "ignore_16bit": false,       // Skip torrents that already have a 16-bit version
-      "ignore_trumpable": false,   // Skip trumpable torrents
-      "auto_download": false,      // Auto-download matched .torrent files
-      "use_fl_token": false,       // Auto-use freeleech tokens
-      "fl_token_threshold": "500", // FL token size threshold (MB)
-      "request_interval": "3.0"    // API request interval (seconds)
-      // ... release type filters, etc.
-    },
-    "OPS": {
-      // Same structure as RED, with independent settings
-    }
-  }
-}
-```
-
-#### Buffer Formula
-
-The buffer formula uses three variables:
-- `U` — Total uploaded bytes
-- `D` — Total downloaded bytes
-- `R` — Required ratio
-
-Default formulas:
-- RED: `(U / 0.65) - D`
-- OPS: `(U / 1.2) - D`
-
----
-
-### 🌐 Internationalization (i18n)
-
-The application fully supports **Chinese (zh_CN)** and **English (en_US)** interfaces. Switch languages anytime from the menu bar: **Language → 中文 / English**.
-
----
-
-### 📁 Project Structure
-
-```
-RedactedAudioToolbox/
-├── main.py                 # Application entry point & tab manager
-├── elitetmhelper2.py       # 24-bit FLAC Finder (search tab core logic + GUI)
-├── flac_downsampler.py     # FLAC downsampler & torrent creator (GUI + logic)
-├── lossless_checker.py     # Lossless/Hi-Res spectrogram checker (GUI + logic)
-├── pipeline_manager.py     # Automation pipeline (download → convert → check → seed)
-├── qbittorrent_client.py   # qBittorrent Web API client
-├── push_to_qb.py           # Torrent push utility
-├── dependency_manager.py   # Auto-download ffmpeg & sox on first run
-├── i18n.py                 # Internationalization (zh_CN / en_US)
-├── config.json             # User configuration (auto-generated)
-├── gui/
-│   └── audit_tab.py        # Quality Audit tab GUI
-├── quality/                # Modular audio quality audit framework
-│   ├── models.py           # Data models (RiskLevel, AudioFeatures, RiskReport, etc.)
-│   ├── config.py           # Scoring thresholds & rule configuration
-│   ├── cli.py              # CLI interface (risk / log / dedup / describe / audit)
-│   ├── features/           # Feature extraction layer
-│   │   ├── extractor.py    # Unified feature pipeline with caching
-│   │   ├── spectrogram.py  # SoX spectrogram analysis (cutoff, gaps, HF energy)
-│   │   ├── audio_stats.py  # ffprobe metadata & fake Hi-Res / MP3 scoring
-│   │   └── channel_analysis.py  # L/R channel similarity detection
-│   ├── risk/               # Risk scoring engine
-│   │   ├── engine.py       # Score normalization & level classification
-│   │   ├── base.py         # Abstract base rule class
-│   │   ├── registry.py     # Auto-discovery plugin registry
-│   │   └── rules/          # 10 pluggable risk rule modules
-│   ├── log_parser/         # EAC / XLD rip log analysis
-│   ├── dedup/              # Duplicate & trump detection
-│   ├── description/        # BBCode upload description generator
-│   └── cache/              # MD5-based feature caching
-├── dataset/                # Test data for quality models
-├── bin/                    # Auto-downloaded ffmpeg & sox binaries
-└── RedactedAudioToolbox.spec  # PyInstaller build spec
 ```
 
 ---
@@ -251,31 +164,7 @@ RedactedAudioToolbox/
 
 > [!WARNING]
 > **The detection and scoring features provided by this tool (including but not limited to lossless/Hi-Res verification, quality audit scoring, risk level assessment, and EAC/XLD log analysis) are for reference purposes only and DO NOT constitute a definitive or authoritative judgment of audio quality.**
-
-- **No universal applicability**: The spectrogram analysis and rule-based scoring algorithms rely on heuristic methods and predefined thresholds. They may produce **false positives** (flagging genuine lossless as fake) or **false negatives** (failing to detect actual transcodes) depending on the source material, mastering characteristics, and audio content.
-- **Not a substitute for manual review**: Automated results should never be treated as the sole basis for determining whether a file is genuine lossless, fake lossless, or fake Hi-Res. **You must always perform your own manual verification** (e.g., visually inspecting spectrograms, cross-referencing with trusted sources) before uploading to any tracker.
-- **User responsibility**: By using this tool, you acknowledge that **you are solely responsible** for the quality and authenticity of any content you upload. Uploading improperly verified content may violate tracker rules and result in warnings or account penalties.
-- **No warranty**: This software is provided "as is" without any warranty of any kind. The authors are not liable for any consequences arising from reliance on the tool's automated analysis results.
-
----
-
-### 🔒 Security Notes
-
-- **API keys** are stored locally in `config.json`. Never commit this file to a public repository
-- The `.gitignore` is pre-configured to exclude `config.json`, cache files, and binary dependencies
-- API requests are rate-limited (configurable interval, default 3 seconds) to comply with tracker rules
-
----
-
-### 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit issues and pull requests.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+> Always perform manual inspection before uploading.
 
 ---
 
@@ -284,31 +173,24 @@ Contributions are welcome! Please feel free to submit issues and pull requests.
 This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 
 ---
-
-### 🙏 Acknowledgments
-
-- [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter) — Modern UI framework
-- [FFmpeg](https://ffmpeg.org/) — Audio processing
-- [SoX](https://sox.sourceforge.net/) — Sound eXchange & spectrogram generation
-- [torf](https://github.com/rndusr/torf) — Torrent file creation
-
----
 ---
 
 <a name="-中文"></a>
 
 ## 🇨🇳 中文
 
-**Redacted Audio Toolbox（Redacted 音乐工具箱）** 是一款功能丰富的多标签页桌面应用程序，基于 Python 和 [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter) 构建。专为无损音乐爱好者和 PT（Private Tracker）用户设计，支持 **Redacted (RED)** 和 **Orpheus (OPS)** 站点，提供从发现 24-bit FLAC 种子到降采样、频谱验证、质量审计和自动做种的完整工作流。
+**Redacted Audio Toolbox（Redacted 音乐工具箱）** 是一款功能丰富的多标签页桌面应用程序，基于 Python 和 [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter) 构建。专为无损音乐爱好者和 PT（Private Tracker）用户设计，支持 **Redacted (RED)** 和 **Orpheus (OPS)** 站点，提供从发现 24-bit FLAC 种子到多格式降采样、频谱验证、EAC/XLD 抓取日志校验与 PCM CRC32 还原比对、高级音频特征分析、以及自动化本地或远程做种的完整工作流。
 
 ### ✨ 核心功能
 
 | 标签页 | 功能 | 说明 |
 |--------|------|------|
 | 🔍 **搜索** | 24-bit FLAC 搜索器 | 通过 Redacted / OPS API 发现和过滤 24-bit FLAC 种子 |
-| 🔽 **降频** | FLAC 批量转换器 | 将 24-bit FLAC 转换为 16-bit/44.1kHz 并自动制种 |
-| 📊 **检测** | 真假无损检测器 | 使用 SoX 频谱图验证音频真实性 |
-| 🏅 **审计** | 质量审计 | AI 驱动的音频质量评分系统 |
+| 🔽 **降频** | 多格式一键转码 | 一键批量将 24-bit FLAC 转换为 16-bit FLAC / MP3 320k / MP3 V0 并制种 |
+| 📊 **检测** | 日志校验与频谱检测 | 使用 SoX 频谱图验证音频，解析 EAC/XLD 日志并匹配真实 PCM CRC32 |
+| 🏅 **审计** | 质量审计 | 模块化、可插拔的音频质量风险评估评分系统 |
+| 🚀 **AAFS** | 高级特征套件 | 深度检测 MQA 编码标志和 Wasted Bits 虚假升频异常 |
+| 🌐 **做种** | 客户端与远程支持 | 支持本地导入 qB / Transmission 做种，或通过 rclone 自动远程上传做种 |
 
 ---
 
@@ -329,29 +211,39 @@ This project is licensed under the MIT License — see the [LICENSE](LICENSE) fi
 - **自动下载**：将匹配的 `.torrent` 文件直接下载到指定目录
 - **结果缓存**：跨会话避免重复处理已查看过的种子
 
-### 🔽 标签页 2：FLAC 批量降频与自动制种
+---
 
-批量处理 24-bit FLAC 专辑目录，为 PT 做种做准备。
+### 🔽 标签页 2：FLAC 批量降频与多格式制种
 
-- **并发处理**：多线程 FFmpeg 转换（可配置线程数）
-- **智能降采样**：24-bit → 16-bit，根据需要进行 44.1kHz/48kHz 采样率转换
-- **元数据保留**：所有 FLAC 标签和内嵌封面图完整保留
-- **自动制种**：使用 `torf` 生成符合 PT 站点规范的 `.torrent` 文件，自动填写正确的 Tracker Announce URL 和 Source 标签
-- **文件夹扫描**：从根目录递归发现所有专辑
-- **跳过逻辑**：自动跳过已经是 16-bit 的专辑
+批量处理 24-bit FLAC 专辑目录，为 PT 转码制种提供一键多格式解决方案。
 
-### 📊 标签页 3：真假无损 / Hi-Res 频谱检测
+- **多格式并行选择**：支持同时勾选任意组合：
+  - `16-bit FLAC`（标准的降位深和抖动重采样）
+  - `MP3 320k`（高品质 CBR MP3）
+  - `MP3 V0`（高品质 VBR MP3）
+- **并发处理**：多线程并发转换（可自定义线程数）
+- **元数据保留**：完整保留所有 FLAC 标签、内嵌封面图和注释
+- **自动制种**：使用 `torf` 生成符合 PT 规范的 `.torrent` 文件，为每个选中的格式生成独立文件夹及种子，自动填写 Tracker Announce URL 和 Source 标签
+- **智能跳过**：自动跳过已经是 16-bit 或者是已经处理过的专辑文件夹
 
-生成并分析音频频谱图以判断音频真实性。
+---
 
-- **SoX 频谱图生成**：为每个音轨生成详细的频率分析图像
-- **自动拼接**：将专辑内所有单曲的频谱图合成一张全景长图，方便上传论坛或保存为检测报告
-- **智能分析**：检测高频截止点，将音频分类为：
-  - ✅ 真无损（True Lossless）
-  - ⚠️ 假无损（有损源转码为 FLAC）
-  - ⚠️ 假 Hi-Res（从 16-bit/44.1kHz 升频）
-- **批量处理**：一次分析整张专辑
-- **可视化输出**：生成的频谱图可保存用于上传至 PT 论坛
+### 📊 标签页 3：真假无损检测 & 日志校验审计
+
+生成并分析音频频谱图，并深度校验抓取日志以判断音频真实性。
+
+- **SoX 频谱图生成**：为每个音轨生成详细的频率分析图像，并自动拼接为专辑全景长图
+- **智能频谱分析**：检测高频截止点，将音频分类为真无损、假无损（有损转码）或假 Hi-Res（升频）
+- **EAC / XLD 日志分析器**：
+  - 自动查找专辑文件夹下的 `.log` 抓取日志
+  - 解析并验证日志 Checksum 校验和，检测日志是否被非法篡改/修图
+  - 提取每首音轨的 Test 和 Copy CRC
+- **PCM CRC32 还原比对**：
+  - 在后台自动将 FLAC 音轨解码为标准 16-bit / 44.1kHz 双声道无损 PCM 数据流
+  - 实时计算各音轨的 PCM CRC32 值，并与日志中记录的 CRC 逐轨比对
+  - 确保音频数据与原始 CD 抓取日志完全一致，排除“假抓取日志”
+
+---
 
 ### 🏅 标签页 4：质量审计
 
@@ -368,25 +260,32 @@ This project is licensed under the MIT License — see the [LICENSE](LICENSE) fi
   - AccurateRip 校验失败
   - CD 源缺失抓取日志扣分
   - WEB 源信任加分
-- **EAC / XLD 日志分析**：解析抓取日志，对不安全读取模式、偏移错误、CRC 不匹配、读取错误等进行扣分
 - **重复 & 顶替检测**：按格式、码率、来源、日志质量和位深度与已有版本进行比较
 - **BBCode 描述生成器**：自动生成格式化的上传描述，包含风险提示和频谱图嵌入
 - **特征缓存**：基于 MD5 的音频特征缓存（可配置 TTL）
-- **风险等级**：安全 → 低风险 → 可疑 → 高风险 → 疑似转码
 - **逐条规则展示**：彩色显示每条触发规则的分值变化和详细说明
 
-### 🔄 自动化流水线
+---
 
-内置的 **Pipeline Manager（流水线管理器）** 将所有标签页串联为全自动工作流：
+### 🚀 标签页 5 / AAFS：高级音频特征套件 (Advanced Audio Feature Suite)
 
-```
-搜索 → 下载 → qBittorrent → 转换 (24bit→16bit) → 频谱检测 → 自动制种 → 做种
-```
+用于识别高规格无损音乐中隐蔽技术特征和封装异常的专项分析模块。
 
-- **qBittorrent 集成**：通过 qBittorrent Web API 监控下载完成状态
-- **自动衔接**：下载完成后自动触发格式转换和频谱检测
-- **手动确认**：可选在上传前弹出对话框供人工审核
-- **后台运行**：流水线在独立线程中运行，不影响应用正常使用
+- **MQA 标志同步字检测**：
+  - 读取音轨数据并执行互相关计算，检测是否存在 MQA 同步字标志（`0xbe1788`）。
+  - 识别出实际为 MQA 编码或带有 MQA 残留的 FLAC 文件，方便用户识别其真实的母带来源。
+- **Wasted Bits 虚假高位深检测**：
+  - 分析 24-bit 音频的底部位深是否为空白（全零）。
+  - 借由 `flac -ac` (或原生位逻辑校验) 检测虚假高位深升频（Wasted Bits Upconvert），验证音轨是否只是由 16-bit 简单填充而成。
+
+---
+
+### 🌐 跨站做种与远程做种支持
+
+- **多客户端支持**：支持本地 qBittorrent 和 **Transmission** 做种客户端接入。
+- **rclone 远程做种**：
+  - 在本地完成转码和制种后，自动调用系统 `rclone` 命令将转码数据包和种子文件同步到远程 Seedbox 服务器。
+  - 自动将种子推送到远程种子客户端（qB/Transmission）并自动开始做种。
 
 ---
 
@@ -394,15 +293,15 @@ This project is licensed under the MIT License — see the [LICENSE](LICENSE) fi
 
 #### 方法一：独立运行程序（推荐 Windows 用户使用）
 
-1. 从 [Releases](https://github.com/whn2000/RedactedAudioToolbox/releases) 页面下载 `RedactedAudioToolbox.exe`
+1. 从项目 `release` 文件夹中下载 `RedactedAudioToolbox.exe`
 2. 双击即可运行 — 无需安装 Python 环境！
-3. 首次启动时，内置的**智能环境依赖管理器**会自动下载并配置 `ffmpeg` 和 `sox`
+3. 首次启动时，内置的环境依赖管理器会自动配置好 `ffmpeg` 和 `sox`
 
 #### 方法二：通过源码运行
 
 **前置要求：**
 - Python 3.8+
-- Windows 操作系统（DPI 感知和部分路径处理为 Windows 特定）
+- Windows 操作系统（DPI 感知和路径处理为 Windows 特定）
 
 ```bash
 # 1. 克隆代码仓库
@@ -410,117 +309,10 @@ git clone https://github.com/whn2000/RedactedAudioToolbox.git
 cd RedactedAudioToolbox
 
 # 2. 安装 Python 依赖库
-pip install requests pillow torf customtkinter
+pip install requests pillow torf customtkinter soundfile numpy scipy transmission-rpc
 
 # 3. 运行主程序
 python main.py
-```
-
-**外部依赖**（首次运行时自动管理）：
-- [FFmpeg](https://ffmpeg.org/) — 音频转换
-- [SoX](https://sox.sourceforge.net/) — 频谱图生成
-
----
-
-### 🛠️ 配置说明
-
-所有设置保存在应用目录下的 `config.json` 中。
-
-#### 配置结构
-
-```jsonc
-{
-  "site": "RED",                    // 当前活跃站点："RED" 或 "OPS"
-  "global": {
-    "qb_host": "http://127.0.0.1", // qBittorrent Web UI 主机地址
-    "qb_port": "8080",             // qBittorrent Web UI 端口
-    "qb_user": "admin",            // qBittorrent 用户名
-    "qb_pass": "adminadmin",       // qBittorrent 密码
-    "enable_pipeline": false        // 启用自动化流水线
-  },
-  "sites": {
-    "RED": {
-      "api_key": "",               // RED API 密钥（设置 → API Keys → 新建密钥）
-      "save_path": "",             // 种子文件保存目录
-      "buffer_formula": "(U / 0.65) - D", // Buffer 计算公式
-      "media": "CD",               // 媒体类型过滤
-      "year_latest": "2025",       // 搜索结束年份
-      "year_earliest": "1970",     // 搜索起始年份
-      "number": "50",              // 目标搜索数量
-      "max_size": "2048",          // 最大种子大小（MB）
-      "order_by": "time",          // 排序方式：time/size/snatched/seeders/random
-      "ignore_lossy": false,       // 跳过 Lossy 批准的种子
-      "ignore_16bit": false,       // 跳过已有 16-bit 版本的种子
-      "ignore_trumpable": false,   // 跳过可被顶替的种子
-      "auto_download": false,      // 自动下载匹配的 .torrent 文件
-      "use_fl_token": false,       // 自动使用免费令牌
-      "fl_token_threshold": "500", // 免费令牌触发大小阈值（MB）
-      "request_interval": "3.0"    // API 请求间隔（秒）
-      // ... 发行类型过滤器等
-    },
-    "OPS": {
-      // 与 RED 结构相同，独立配置
-    }
-  }
-}
-```
-
-#### Buffer 计算公式
-
-公式中可使用以下变量：
-- `U` — 总上传字节数
-- `D` — 总下载字节数
-- `R` — 需求比率（Required Ratio）
-
-默认公式：
-- RED：`(U / 0.65) - D`
-- OPS：`(U / 1.2) - D`
-
----
-
-### 🌐 国际化 (i18n)
-
-应用完整支持**中文 (zh_CN)** 和**英文 (en_US)** 界面。随时通过菜单栏切换语言：**语言 → 中文 / English**。
-
----
-
-### 📁 项目结构
-
-```
-RedactedAudioToolbox/
-├── main.py                 # 应用入口 & 标签页管理器
-├── elitetmhelper2.py       # 24-bit FLAC 搜索器（搜索标签页核心逻辑 + GUI）
-├── flac_downsampler.py     # FLAC 降频器 & 制种工具（GUI + 逻辑）
-├── lossless_checker.py     # 真假无损频谱检测器（GUI + 逻辑）
-├── pipeline_manager.py     # 自动化流水线（下载 → 转换 → 检测 → 做种）
-├── qbittorrent_client.py   # qBittorrent Web API 客户端
-├── push_to_qb.py           # 种子推送工具
-├── dependency_manager.py   # 首次运行自动下载 ffmpeg & sox
-├── i18n.py                 # 国际化（zh_CN / en_US）
-├── config.json             # 用户配置（自动生成）
-├── gui/
-│   └── audit_tab.py        # 质量审计标签页 GUI
-├── quality/                # 模块化音频质量审计框架
-│   ├── models.py           # 数据模型（RiskLevel、AudioFeatures、RiskReport 等）
-│   ├── config.py           # 评分阈值 & 规则配置
-│   ├── cli.py              # CLI 命令行接口（risk / log / dedup / describe / audit）
-│   ├── features/           # 特征提取层
-│   │   ├── extractor.py    # 统一特征管线（带缓存）
-│   │   ├── spectrogram.py  # SoX 频谱分析（截止频率、间隙、高频能量）
-│   │   ├── audio_stats.py  # ffprobe 元数据 & 假 Hi-Res / MP3 评分
-│   │   └── channel_analysis.py  # 左右声道相似度检测
-│   ├── risk/               # 风险评分引擎
-│   │   ├── engine.py       # 分数归一化 & 等级分类
-│   │   ├── base.py         # 抽象基础规则类
-│   │   ├── registry.py     # 自动发现插件注册表
-│   │   └── rules/          # 10 个可插拔风险规则模块
-│   ├── log_parser/         # EAC / XLD 抓取日志分析
-│   ├── dedup/              # 重复 & 顶替检测
-│   ├── description/        # BBCode 上传描述生成器
-│   └── cache/              # 基于 MD5 的特征缓存
-├── dataset/                # 模型训练数据
-├── bin/                    # 自动下载的 ffmpeg & sox 二进制文件
-└── RedactedAudioToolbox.spec  # PyInstaller 打包配置
 ```
 
 ---
@@ -528,47 +320,14 @@ RedactedAudioToolbox/
 ### ⚠️ 免责声明
 
 > [!WARNING]
-> **本工具提供的检测与评分功能（包括但不限于真假无损/Hi-Res 检测、质量审计评分、风险等级评估、EAC/XLD 日志分析）仅供参考，不构成对音频质量的权威或最终判定。**
-
-- **不具有普适性**：频谱分析和基于规则的评分算法依赖于启发式方法和预设阈值。由于音源素材、母带处理方式和音频内容的差异，可能产生**误报**（将真正的无损标记为假无损）或**漏报**（未能检出实际的转码文件）。
-- **不能替代人工审核**：自动化检测结果绝不应作为判断文件是否为真无损、假无损或假 Hi-Res 的唯一依据。**在上传到任何 Tracker 之前，您必须自行进行人工核验**（例如：目视检查频谱图、与可信来源交叉比对等）。
-- **用户责任**：使用本工具即表示您确认并同意，**您对上传内容的质量和真实性承担全部责任**。上传未经充分验证的内容可能违反 Tracker 规则，导致警告或账号处罚。
-- **无担保声明**：本软件按「现状」提供，不附带任何形式的担保。作者不对因依赖本工具自动化分析结果而产生的任何后果承担责任。
-
----
-
-### 🔒 安全须知
-
-- **API 密钥** 存储在本地 `config.json` 文件中，切勿将此文件提交到公开仓库
-- `.gitignore` 已预配置排除 `config.json`、缓存文件和二进制依赖
-- API 请求速率受限（可配置间隔，默认 3 秒），以遵守 Tracker 规则
-
----
-
-### 🤝 参与贡献
-
-欢迎提交 Issue 和 Pull Request！
-
-1. Fork 本仓库
-2. 创建功能分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'Add some amazing feature'`)
-4. 推送分支 (`git push origin feature/amazing-feature`)
-5. 发起 Pull Request
+> **本工具提供的检测与评分功能（包括但不限于真假无损/Hi-Res 检测、质量审计评分、风险等级评估、EAC/XLD 日志分析、PCM CRC32 还原比对）仅供参考，不构成对音频质量的权威或最终判定。**
+> 请在上传前配合人工频谱审查。
 
 ---
 
 ### 📄 许可证
 
 本项目使用 MIT 许可证 — 详见 [LICENSE](LICENSE) 文件。
-
----
-
-### 🙏 致谢
-
-- [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter) — 现代 UI 框架
-- [FFmpeg](https://ffmpeg.org/) — 音频处理
-- [SoX](https://sox.sourceforge.net/) — 声音处理 & 频谱图生成
-- [torf](https://github.com/rndusr/torf) — 种子文件创建
 
 ---
 

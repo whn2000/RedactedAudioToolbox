@@ -184,7 +184,18 @@ TRANSLATIONS = {
         "log_found_files_aafs": "找到 {total_files} 个音频文件，开始并发分析...",
         "log_aafs_genuine": "✅ 真无损/真Hi-Res",
         "log_aafs_fake_reason": "\n      └─ 鉴定原因: {reason_str}",
-        "log_aafs_exception": "❌ 分析异常: {e}"
+        "log_aafs_exception": "❌ 分析异常: {e}",
+        
+        # Discovery Tab
+        "tab_discovery": "跨平台发现",
+        "search_query": "搜索关键词:",
+        "search": "搜索",
+        "qq_music": "QQ音乐",
+        "netease_music": "网易云音乐",
+        "apple_music": "Apple Music",
+        "youtube_music": "YouTube Music",
+        "search_results": "搜索结果",
+        "download_selected": "下载选中项"
     },
     "en_US": {
         "log_sys_error_final": "\n❌ [System Error]: Uncaught exception - {e}\n{tb}",
@@ -350,7 +361,18 @@ TRANSLATIONS = {
         "log_found_files_aafs": "Found {total_files} audio files, starting concurrent analysis...",
         "log_aafs_genuine": "✅ Genuine Lossless/Hi-Res",
         "log_aafs_fake_reason": "\n      └─ Reason: {reason_str}",
-        "log_aafs_exception": "❌ Analysis Exception: {e}"
+        "log_aafs_exception": "❌ Analysis Exception: {e}",
+        
+        # Discovery Tab
+        "tab_discovery": "Discovery",
+        "search_query": "Search Query:",
+        "search": "Search",
+        "qq_music": "QQ Music",
+        "netease_music": "NetEase",
+        "apple_music": "Apple Music",
+        "youtube_music": "YouTube Music",
+        "search_results": "Search Results",
+        "download_selected": "Download Selected"
     }
 }
 

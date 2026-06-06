@@ -103,7 +103,95 @@ class PipelineManager:
     def _change_category(self, torrent_hash, new_category):
         return self.qb.set_category(torrent_hash, new_category)
 
-    def _process_downloaded_torrent(self, save_path, name, qb_torrent_info):
+    # ------------------------------------------------------------------
+    # 手动入队接口（供 Pipeline 标签页调用）
+    # ------------------------------------------------------------------
+
+    def queue_folder_for_processing(self, folder_path: str, on_status_change=None, json_path: str = None):
+        """
+        将一个本地已下载完成的音乐目录手动加入流水线处理。
+        不经过 qBittorrent，直接执行：降频 → 无损检查 → 上传。
+
+        Parameters
+        ----------
+        folder_path : str
+            音乐目录的完整路径（例如 /data/Artist - Album [24bit]）
+        on_status_change : callable(status: str) | None
+            状态变更回调，参数为字符串：'processing' / 'done' / 'failed'
+        json_path : str | None
+            可选的 .json 元数据文件路径，用于自动上传
+        """
+        album_dir = Path(folder_path)
+        if not album_dir.exists() or not album_dir.is_dir():
+            self.log_process(_("log_album_dir_not_found").format(album_dir=album_dir))
+            if on_status_change:
+                on_status_change("failed")
+            return
+
+        self.log_main(f">>> [手动入队] 开始处理本地目录: {album_dir.name}")
+        if on_status_change:
+            on_status_change("processing")
+
+        def _run():
+            try:
+                self._process_downloaded_torrent(album_dir.parent, album_dir.name, None, manual_json_path=json_path)
+                if on_status_change:
+                    on_status_change("done")
+            except Exception as e:
+                self.log_process(f"[手动入队] 处理异常: {e}")
+                if on_status_change:
+                    on_status_change("failed")
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def push_torrent_to_qb(self, torrent_path: str, save_path: str, on_status_change=None):
+        """
+        将一个 .torrent 文件推送到 qBittorrent（分类 red_auto），
+        下载完成后 monitor loop 会自动触发后处理流程。
+
+        若同目录下存在同名 .json 元数据文件，会自动被 pipeline 找到并用于上传。
+
+        Parameters
+        ----------
+        torrent_path : str
+            .torrent 文件路径
+        save_path : str
+            qBittorrent 下载保存路径
+        on_status_change : callable(status: str) | None
+            状态变更回调
+        """
+        path = Path(torrent_path)
+        if not path.exists():
+            self.log_main(f"[手动入队] 种子文件不存在: {torrent_path}")
+            if on_status_change:
+                on_status_change("failed")
+            return
+
+        if on_status_change:
+            on_status_change("queued_in_qb")
+
+        success = self.qb.add_torrent(torrent_path, save_path=save_path, category="red_auto")
+        if success:
+            self.log_main(f"[手动入队] 已推送到 qBittorrent，等待下载完成: {path.name}")
+            if on_status_change:
+                on_status_change("downloading")
+        else:
+            self.log_main(f"[手动入队] 推送 qBittorrent 失败: {path.name}")
+            if on_status_change:
+                on_status_change("failed")
+
+    def process_local_directory(self, dir_path: str):
+        """外部触发的直接处理本地目录入口 (用于发现模块下载后的处理) — 兼容旧接口"""
+        album_dir = Path(dir_path)
+        if not album_dir.exists() or not album_dir.is_dir():
+            self.log_process(_("log_album_dir_not_found").format(album_dir=album_dir))
+            return
+            
+        self.log_main(f">>> 开始处理本地目录: {album_dir.name}")
+        # 内部复用 _process_downloaded_torrent，传入 None 作为 qb_torrent_info 标识为本地处理
+        threading.Thread(target=self._process_downloaded_torrent, args=(album_dir.parent, album_dir.name, None), daemon=True).start()
+
+    def _process_downloaded_torrent(self, save_path, name, qb_torrent_info, manual_json_path=None):
         try:
             site_config = getattr(self.red_options, 'site_config', _DEFAULT_SITE_CONFIG)
             base_url = site_config["base_url"]
@@ -143,7 +231,8 @@ class PipelineManager:
                         user_confirmed = self.ask_manual_check(output_dir.name)
                         if not user_confirmed:
                             self.log_check(_("log_manual_confirm_fail").format(name=output_dir.name))
-                            self._mark_failed(qb_torrent_info)
+                            if qb_torrent_info:
+                                self._mark_failed(qb_torrent_info)
                             return
                         self.log_check(_("log_manual_confirm_pass").format(name=output_dir.name))
                     else:
@@ -160,21 +249,24 @@ class PipelineManager:
 
             # 3. 自动上传 (从本地 .json 恢复 Context)
             json_meta_path = None
-            hash_str_lower = qb_torrent_info.get("hash", "").lower()
-            
-            # 必须去 elitetmhelper 原本设定的下载目录里找，而不是 qb 的保存目录
-            original_save_dir = Path(self.red_options.save_path) if self.red_options.save_path else Path(".")
-            
-            for tf in original_save_dir.glob('*.torrent'):
-                try:
-                    t_obj = Torrent.read(str(tf))
-                    if t_obj.infohash.lower() == hash_str_lower:
-                        candidate_json = tf.with_suffix('.json')
-                        if candidate_json.exists():
-                            json_meta_path = candidate_json
-                            break
-                except Exception:
-                    pass
+            if manual_json_path and Path(manual_json_path).exists():
+                json_meta_path = Path(manual_json_path)
+            else:
+                hash_str_lower = qb_torrent_info.get("hash", "").lower() if qb_torrent_info else ""
+                
+                # 必须去 elitetmhelper 原本设定的下载目录里找，而不是 qb 的保存目录
+                original_save_dir = Path(self.red_options.save_path) if self.red_options.save_path else Path(".")
+                
+                for tf in original_save_dir.glob('*.torrent'):
+                    try:
+                        t_obj = Torrent.read(str(tf))
+                        if t_obj.infohash.lower() == hash_str_lower:
+                            candidate_json = tf.with_suffix('.json')
+                            if candidate_json.exists():
+                                json_meta_path = candidate_json
+                                break
+                    except Exception:
+                        pass
             
             if not json_meta_path:
                 self.log_main(_("log_no_meta_file").format(hash=hash_str_lower))
@@ -253,13 +345,19 @@ class PipelineManager:
             # 执行循环上传
             upload_url = f"{api_url}?action=upload"
             auth_key = self.red_options.api_key
-            if site_config.get("source") == "OPS" and not auth_key.startswith("token "):
-                auth_key = f"token {auth_key}"
-                
-            headers = {
-                'Authorization': auth_key,
-                'User-Agent': 'EliteTMHelper_AutoUpload'
-            }
+            auth_type = site_config.get("auth_type", "api_key")
+            if auth_type == "cookie":
+                headers = {
+                    'Cookie': auth_key,
+                    'User-Agent': 'EliteTMHelper_AutoUpload'
+                }
+            else:
+                if site_config.get("source") == "OPS" and not auth_key.startswith("token "):
+                    auth_key = f"token {auth_key}"
+                headers = {
+                    'Authorization': auth_key,
+                    'User-Agent': 'EliteTMHelper_AutoUpload'
+                }
             
             for idx, up in enumerate(uploads):
                 if idx > 0:
@@ -319,14 +417,130 @@ class PipelineManager:
                     break
                     
             # 全部上传循环结束后，无论后面 MP3 成功与否，只要处理完毕就标记为已处理。
-            self._change_category(hash_str_lower, "red_processed")
-
+            if qb_torrent_info:
+                self._change_category(qb_torrent_info.get("hash"), "red_processed")
+            
         except Exception as e:
+            self.log_process(_("log_pipeline_exception").format(e=e))
             self.log_main(_("log_pipeline_exception").format(e=e))
             traceback.print_exc()
-            self._mark_failed(qb_torrent_info)
+            if qb_torrent_info:
+                self._mark_failed(qb_torrent_info)
+
+    def process_discovery_upload(self, folder_path, meta_info):
+        """
+        处理 Discovery 模块下载的本地目录，
+        跳过 qBittorrent 交互，直接执行全新上传流程。
+
+        注意: 与 process_local_directory() 不同，
+        此方法用于从未发布过的全新专辑，需要提供完整的元数据。
+        """
+        if not isinstance(folder_path, Path):
+            folder_path = Path(folder_path)
+            
+        self.log_main(f">>> 开始处理 Discovery 下载目录: {folder_path.name}")
+        threading.Thread(target=self._process_discovery_upload, args=(folder_path, meta_info), daemon=True).start()
+
+    def _process_discovery_upload(self, album_dir, meta_info):
+        try:
+            res_id = meta_info.get("discovery_result_id")
+            target_sites = meta_info.get("target_sites", ["RED"])
+            
+            # 从数据库获取信息
+            artist = "Unknown Artist"
+            album = "Unknown Album"
+            year = 2024
+            if self.db and res_id:
+                row = self.db.fetch_one("SELECT * FROM discovery_results WHERE id = ?", (res_id,))
+                if row:
+                    artist = row['artist']
+                    album = row['album']
+                    year = row['year'] or 2024
+            
+            # 生成种子
+            self.log_process(f"    [Pipeline] 正在为 {album_dir.name} 生成种子...")
+            import subprocess
+            tracker_url = getattr(self.red_options, 'site_config', {}).get("tracker_url", "https://flacsfor.me/announce")
+            torrent_path = album_dir.parent / f"{album_dir.name}.torrent"
+            
+            # 使用 mktorrent 生成
+            cmd = ['mktorrent', '-p', '-a', tracker_url, '-o', str(torrent_path), str(album_dir)]
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            if not torrent_path.exists():
+                self.log_main(f"生成种子失败: {torrent_path}")
+                if self.db and res_id:
+                    self.db.execute("UPDATE discovery_results SET status = 'failed' WHERE id = ?", (res_id,))
+                return
+                
+            # 执行全新上传
+            for site in target_sites:
+                site_config = getattr(self.red_options, 'site_config', {})
+                # Note: Real implementation would need to fetch the specific API URL and Auth for the target site from gateway
+                # For this MVP, we use the current default api_url
+                api_url = site_config.get("api_url", "https://redacted.sh/ajax.php")
+                auth_key = self.red_options.api_key
+                
+                upload_url = f"{api_url}?action=upload"
+                headers = {
+                    'Authorization': auth_key,
+                    'User-Agent': 'EliteTMHelper_AutoUpload'
+                }
+                
+                # 全新上传所需的字段
+                upload_data = {
+                    'submit': 'true',
+                    'type': '0',
+                    'artists[]': artist,
+                    'importance[]': '1', # Main
+                    'title': album,
+                    'year': str(year),
+                    'releasetype': '1', # Album
+                    'format': 'FLAC',
+                    'bitrate': 'Lossless',
+                    'media': 'WEB',
+                    'tags': 'pop', # Default tag, RED requires at least one
+                    'release_desc': f"Automated upload by Discovery Module from EliteTMHelper2."
+                }
+                
+                self.log_main(f"    [Pipeline] 正在向 {site} 全新发布: {album_dir.name}")
+                with open(torrent_path, 'rb') as f:
+                    files = {'file_input': (torrent_path.name, f, 'application/x-bittorrent')}
+                    import requests
+                    resp = requests.post(upload_url, headers=headers, data=upload_data, files=files, timeout=30)
+                
+                if resp.status_code == 200:
+                    try:
+                        resp_json = resp.json()
+                        if resp_json.get('status') == 'success':
+                            self.log_main(f"    [Pipeline] {site} 上传成功！")
+                            if self.db and res_id:
+                                self.db.execute("UPDATE discovery_results SET status = 'uploaded' WHERE id = ?", (res_id,))
+                        else:
+                            self.log_main(f"    [Pipeline] {site} API 返回错误: {resp_json}")
+                            if self.db and res_id:
+                                self.db.execute("UPDATE discovery_results SET status = 'failed' WHERE id = ?", (res_id,))
+                    except Exception as e:
+                        self.log_main(f"    [Pipeline] 解析 {site} 响应失败: {e}")
+                else:
+                    self.log_main(f"    [Pipeline] {site} HTTP 错误: {resp.status_code}")
+                    if self.db and res_id:
+                        self.db.execute("UPDATE discovery_results SET status = 'failed' WHERE id = ?", (res_id,))
+                        
+            # 将种子添加到 qBittorrent 做种
+            self.log_process("    [Pipeline] 正在将种子添加到 qBittorrent 做种...")
+            self.qb.add_torrent(str(torrent_path), save_path=str(album_dir.parent), category="red_seeding")
+            
+        except Exception as e:
+            self.log_process(f"全新上传处理异常: {e}")
+            import traceback
+            traceback.print_exc()
+            res_id = meta_info.get("discovery_result_id")
+            if self.db and res_id:
+                self.db.execute("UPDATE discovery_results SET status = 'failed' WHERE id = ?", (res_id,))
 
     def _mark_failed(self, qb_torrent_info):
+        """将失败任务移至 red_failed 类别，停止不断重试"""
         if not qb_torrent_info: return
         hash_str = qb_torrent_info.get("hash")
         

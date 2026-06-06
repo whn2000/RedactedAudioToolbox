@@ -22,6 +22,8 @@ from aafs.extractors.brickwall import detect_brickwall
 from aafs.extractors.spectral_holes import detect_spectral_holes
 from aafs.extractors.bit_depth import detect_fake_bit_depth_via_lsb
 from aafs.extractors.provenance import detect_tape_hiss_or_analog_noise
+from aafs.extractors.mqa import detect_mqa_file
+from aafs.extractors.wasted_bits import detect_wasted_bits
 from aafs.inference.scorer import SimpleScorer
 
 if os.name == 'nt':
@@ -71,6 +73,8 @@ def translate_aafs_reason(reason_str):
     reason_str = reason_str.replace("fake_lossless (transcoded)", "假无损 (由低音质转码)")
     reason_str = reason_str.replace("fake_hi_res (upsampled)", "假高解析 (由低采样率拉升)")
     reason_str = reason_str.replace("fake_hi_res (padded_bitdepth)", "假高解析 (位深填充)")
+    reason_str = reason_str.replace("fake_hi_res (upsampled / padded)", "假高解析 (由低采样率拉升/位深填充)")
+    reason_str = reason_str.replace("MQA encoded (lossy)", "MQA 编码 (有损)")
     reason_str = reason_str.replace("genuine", "真无损/高解析")
     
     if "Brickwall filter detected with cutoff around" in reason_str:
@@ -140,6 +144,15 @@ def analyze_single_file(file_path, idx, total, output_dir, fast_mode=False):
         # 4. Provenance
         ev_prov = detect_tape_hiss_or_analog_noise(S_mag, freqs)
         if ev_prov: evidences.append(ev_prov)
+
+        # 5. MQA Detection
+        ev_mqa = detect_mqa_file(str(file_path))
+        if ev_mqa: evidences.append(ev_mqa)
+
+        # 6. Wasted Bits Upconvert Detection
+        if bit_depth > 16:
+            ev_wasted = detect_wasted_bits(str(file_path), declared_bit_depth=bit_depth)
+            if ev_wasted: evidences.append(ev_wasted)
             
         # 评分与降权
         scorer = SimpleScorer()
@@ -260,6 +273,42 @@ def process_album(album_dir, output_dir=None, fast_mode=False):
             all_lossless = False
             
     print("=" * 88)
+
+    # 查找并校验 Ripping Log
+    log_files = list(album_path.glob("*.log"))
+    if log_files:
+        print("\n" + "="*35 + " Ripping Log 校验报告 " + "="*35)
+        from core.log_checker import parse_log_file, verify_album_against_log
+        for log_f in log_files:
+            print(f"📄 正在校验日志: {log_f.name}")
+            log_res = parse_log_file(str(log_f))
+            if not log_res:
+                print("  ❌ 无法解析日志文件。")
+                continue
+                
+            print(f"  日志类型: {log_res.log_type}")
+            print(f"  日志得分: {log_res.score}/100")
+            print(f"  Checksum: {'✅ OK' if log_res.checksum_ok else '❌ 损坏/缺失'}")
+            if log_res.issues:
+                print("  存在的问题:")
+                for issue in log_res.issues:
+                    print(f"    - {issue}")
+                    
+            print("  逐轨 CRC 比对:")
+            verif_details = verify_album_against_log(str(album_path), log_res)
+            all_match = True
+            for det in verif_details:
+                status_str = "✅ 匹配" if det["matches"] else f"❌ 不匹配 (Log: {det['log_crc']} vs Calc: {det['calculated_crc']})"
+                if not det["matches"]:
+                    all_match = False
+                print(f"    音轨 {det['track']}: {det['file'][:30]} => {status_str}")
+                
+            if all_match and log_res.checksum_ok:
+                print("  🎉 日志校验成功！所有音轨的 CRC 校验码与抓取日志完美匹配。")
+            else:
+                print("  ⚠️ 警告: 存在 CRC 不匹配或日志篡改风险，请务必人工核对！")
+        print("=" * 88)
+        
     return all_lossless
 
 

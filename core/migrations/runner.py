@@ -8,7 +8,7 @@ logger = get_logger(__name__)
 
 # 定义当前代码库预期的结构版本
 EXPECTED_YAML_VERSION = 1
-EXPECTED_DB_SCHEMA_VERSION = 1
+EXPECTED_DB_SCHEMA_VERSION = 3
 
 class MigrationRunner:
     """
@@ -78,10 +78,43 @@ class MigrationRunner:
             return
             
         with self.db.transaction() as cursor:
-            # TODO: 未来在此处添加具体的 schema 变更逻辑 (例如 v1 -> v2)
-            # if current == 1: 
-            #     cursor.execute("ALTER TABLE risk_scores ADD COLUMN extra_info TEXT")
-            #     current = 2
+            if current == 1: 
+                # 从 V1 到 V2：更新 watch_artists，增加 discovery_results
+                try:
+                    cursor.execute("ALTER TABLE watch_artists ADD COLUMN target_sites TEXT DEFAULT '[\"RED\"]'")
+                    cursor.execute("ALTER TABLE watch_artists ADD COLUMN enabled INTEGER DEFAULT 1")
+                    cursor.execute("ALTER TABLE watch_artists ADD COLUMN check_interval INTEGER DEFAULT 43200")
+                except Exception as e:
+                    logger.warning(f"ALTER TABLE 可能部分已存在 (这在开发调试期间可能发生): {e}")
+
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS discovery_results (
+                    id TEXT PRIMARY KEY,
+                    artist TEXT NOT NULL,
+                    album TEXT NOT NULL,
+                    year INTEGER,
+                    platform TEXT NOT NULL,
+                    platform_id TEXT NOT NULL,
+                    red_exists INTEGER DEFAULT 0,
+                    ops_exists INTEGER DEFAULT 0,
+                    red_group_id INTEGER,
+                    ops_group_id INTEGER,
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                """)
+                current = 2
+
+            if current == 2:
+                try:
+                    cursor.execute("ALTER TABLE discovery_results ADD COLUMN jps_exists INTEGER DEFAULT 0")
+                    cursor.execute("ALTER TABLE discovery_results ADD COLUMN dic_exists INTEGER DEFAULT 0")
+                    cursor.execute("ALTER TABLE discovery_results ADD COLUMN jps_group_id INTEGER")
+                    cursor.execute("ALTER TABLE discovery_results ADD COLUMN dic_group_id INTEGER")
+                except Exception as e:
+                    logger.warning(f"ALTER TABLE 可能部分已存在: {e}")
+                current = 3
             
             # 最后必须更新版本号
             cursor.execute("UPDATE meta SET value = ? WHERE key = 'schema_version'", (str(target),))

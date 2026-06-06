@@ -9,7 +9,7 @@ from .logger import get_logger
 logger = get_logger(__name__)
 
 # 当前代码库的目标 Schema 版本
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 3
 
 INIT_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -54,6 +54,70 @@ CREATE TABLE IF NOT EXISTS task_runtime (
     error_message TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS discovery_cache (
+    id TEXT PRIMARY KEY,
+    artist TEXT NOT NULL,
+    album TEXT NOT NULL,
+    year INTEGER,
+    edition TEXT,
+    platform TEXT NOT NULL,
+    platform_id TEXT NOT NULL,
+    platform_url TEXT,
+    upc TEXT,
+    label TEXT,
+    best_quality TEXT,
+    red_status TEXT DEFAULT 'unchecked',
+    red_group_id INTEGER,
+    red_missing_formats TEXT,
+    red_existing_editions TEXT,
+    metadata TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    checked_at TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS watch_artists (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    artist_name TEXT NOT NULL UNIQUE,
+    platforms TEXT DEFAULT '["all"]',
+    target_sites TEXT DEFAULT '["RED"]',
+    enabled INTEGER DEFAULT 1,
+    check_interval INTEGER DEFAULT 43200,
+    last_checked TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS discovery_results (
+    id TEXT PRIMARY KEY,
+    artist TEXT NOT NULL,
+    album TEXT NOT NULL,
+    year INTEGER,
+    platform TEXT NOT NULL,
+    platform_id TEXT NOT NULL,
+    red_exists INTEGER DEFAULT 0,
+    ops_exists INTEGER DEFAULT 0,
+    jps_exists INTEGER DEFAULT 0,
+    dic_exists INTEGER DEFAULT 0,
+    red_group_id INTEGER,
+    ops_group_id INTEGER,
+    jps_group_id INTEGER,
+    dic_group_id INTEGER,
+    status TEXT DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS discovery_tasks (
+    id TEXT PRIMARY KEY,
+    discovery_id TEXT NOT NULL,
+    task_type TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    output_path TEXT,
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (discovery_id) REFERENCES discovery_cache(id)
 );
 """
 

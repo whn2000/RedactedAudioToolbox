@@ -4,10 +4,12 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from dependency_manager import check_and_install_dependencies
-from elitetmhelper2 import AppGUI as RedactedFinderGUI
+from gui.search_tab import AppGUI as RedactedFinderGUI
 from flac_downsampler import FlacDownsamplerGUI
 from lossless_checker import LosslessCheckerGUI
 from gui.failed_tasks_tab import FailedTasksGUI
+from gui.discovery_tab import DiscoveryTabGUI
+from gui.pipeline_tab import PipelineTabGUI
 
 from i18n import _, set_language, CURRENT_LANG, subscribe_lang_change
 from core.context import AppContext
@@ -47,17 +49,24 @@ class MainApp:
         self.tab_name_search = _("tab_search")
         self.tab_name_downsample = _("tab_downsample")
         self.tab_name_check = _("tab_check")
-        self.tab_name_failed = "Failed Tasks"
+        self.tab_name_pipeline = "⚙️ Pipeline"
+        self.tab_name_failed = "❌ Failed Tasks"
+        self.tab_name_discovery = "🌐 " + _("tab_discovery") if _("tab_discovery") != "tab_discovery" else "🌐 Discovery"
         
         self.tabview.add(self.tab_name_search)
         self.tabview.add(self.tab_name_downsample)
         self.tabview.add(self.tab_name_check)
+        self.tabview.add(self.tab_name_pipeline)
         self.tabview.add(self.tab_name_failed)
+        self.tabview.add(self.tab_name_discovery)
         
         self.app1 = RedactedFinderGUI(self.tabview.tab(self.tab_name_search))
         self.app2 = FlacDownsamplerGUI(self.tabview.tab(self.tab_name_downsample))
         self.app3 = LosslessCheckerGUI(self.tabview.tab(self.tab_name_check))
-        self.app5 = FailedTasksGUI(self.tabview.tab(self.tab_name_failed), getattr(self.app1, 'pipeline', None))
+        # 传入 self.app1 引用，让各标签页动态获取 pipeline（解决初始化时永远 None 的问题）
+        self.app_pipeline = PipelineTabGUI(self.tabview.tab(self.tab_name_pipeline), self.app1)
+        self.app5 = FailedTasksGUI(self.tabview.tab(self.tab_name_failed), self.app1)
+        self.app_discovery = DiscoveryTabGUI(self.tabview.tab(self.tab_name_discovery), core.globals.app_context, getattr(self.app1, 'pipeline', None))
 
     def update_ui_text(self):
         self.root.title(_("title"))
