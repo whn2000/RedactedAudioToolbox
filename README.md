@@ -335,7 +335,7 @@ python main.py
 
 This project is built upon and inspired by the following amazing open-source projects / 本项目基于以下优秀的开源项目构建或受其启发：
 
-- **[smoked-salmon](https://github.com/vampire-yuta/smoked-salmon)**: An audio verification and seeding utility for PT users, from which we migrated the AAFS core, rip log parser, multi-format transcoding logic, and remote seeding client features / 优秀的 PT 音乐审计与转制种工具，本项目的高级音频特征分析（AAFS）、EAC/XLD 抓取日志校验、多格式转码逻辑以及远程做种支持均移植或参考自该项目。
+- **[smoked-salmon](https://github.com/smokin-salmon/smoked-salmon)**: An audio verification and seeding utility for PT users, from which we migrated the AAFS core, rip log parser, multi-format transcoding logic, and remote seeding client features / 优秀的 PT 音乐审计与转制种工具，本项目的高级音频特征分析（AAFS）、EAC/XLD 抓取日志校验、多格式转码逻辑以及远程做种支持均移植或参考自该项目。
 - **[CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)**: Modern, customizable GUI library for Python Tkinter / 现代化的 Tkinter 界面组件库。
 - **[numpy](https://github.com/numpy/numpy)**: Fundamental package for scientific computing, used for MQA syncword correlation / 基础科学计算库，用于 MQA 同步字相关性分析。
 - **[scipy](https://github.com/scipy/scipy)**: Python library for scientific and technical computing / 科学与信号处理库。
