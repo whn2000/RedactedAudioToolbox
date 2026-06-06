@@ -331,6 +331,27 @@ python main.py
 
 ---
 
+### 🙏 Acknowledgments / 致谢
+
+This project is built upon and inspired by the following amazing open-source projects / 本项目基于以下优秀的开源项目构建或受其启发：
+
+- **[CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)**: Modern, customizable GUI library for Python Tkinter / 现代化的 Tkinter 界面组件库。
+- **[numpy](https://github.com/numpy/numpy)**: Fundamental package for scientific computing, used for MQA syncword correlation / 基础科学计算库，用于 MQA 同步字相关性分析。
+- **[scipy](https://github.com/scipy/scipy)**: Python library for scientific and technical computing / 科学与信号处理库。
+- **[librosa](https://github.com/librosa/librosa)**: Python package for music and audio analysis / 音乐及音频特征分析库。
+- **[soundfile](https://github.com/bastibe/python-soundfile)**: Audio library based on libsndfile, used for decoding audio to PCM streams / 基于 libsndfile 的音频读写库，用于音轨的 PCM 解码与校验。
+- **[torf](https://github.com/rndusr/torf)**: High-level Python library for creating torrents / 高级 Python 制种库，用于生成 PT 规范的种子。
+- **[transmission-rpc](https://github.com/progressbar/transmission-rpc)**: Python client library for Transmission RPC / Transmission 远程客户端通信库。
+- **[pillow](https://github.com/python-pillow/Pillow)**: Python Imaging Library, used for stitching track spectrograms / 图像处理库，用于拼接专辑频谱长图。
+- **[RapidFuzz](https://github.com/rapidfuzz/RapidFuzz)**: Rapid fuzzy string matching / 快速模糊字符串匹配库。
+- **[requests](https://github.com/psf/requests)**: Simple yet elegant HTTP library for Python / Python HTTP 请求库。
+- **[mutagen](https://github.com/quodlibet/mutagen)**: Python module to handle audio metadata / 音频元数据（FLAC/MP3 标签）读写模块。
+- **[FFmpeg](https://ffmpeg.org/)**: A complete, cross-platform solution to convert audio / 跨平台音频转换引擎，用于音频降频与转码。
+- **[SoX (Sound eXchange)](https://sox.sourceforge.net/)**: The Swiss Army knife of sound processing, used for spectrogram generation / 音频处理工具，用于生成高精度频谱图。
+- **[PyInstaller](https://github.com/pyinstaller/pyinstaller)**: Packages Python applications into standalone executables / 将 Python 项目打包成独立可执行程序的工具。
+
+---
+
 <p align="center">
   Built with ❤️ for the audiophile community / 为无损音乐爱好者社区倾心打造
 </p>
