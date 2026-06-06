@@ -173,6 +173,28 @@ python main.py
 This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 
 ---
+
+### 🙏 Acknowledgments
+
+This project is built upon and inspired by the following amazing open-source projects:
+
+- **[smoked-salmon](https://github.com/smokin-salmon/smoked-salmon)**: An audio verification and seeding utility for PT users, from which we migrated the AAFS core, rip log parser, multi-format transcoding logic, and remote seeding client features.
+- **[CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)**: Modern, customizable GUI library for Python Tkinter.
+- **[numpy](https://github.com/numpy/numpy)**: Fundamental package for scientific computing, used for MQA syncword correlation.
+- **[scipy](https://github.com/scipy/scipy)**: Python library for scientific and technical computing.
+- **[librosa](https://github.com/librosa/librosa)**: Python package for music and audio analysis.
+- **[soundfile](https://github.com/bastibe/python-soundfile)**: Audio library based on libsndfile, used for decoding audio to PCM streams.
+- **[torf](https://github.com/rndusr/torf)**: High-level Python library for creating torrents.
+- **[transmission-rpc](https://github.com/progressbar/transmission-rpc)**: Python client library for Transmission RPC.
+- **[pillow](https://github.com/python-pillow/Pillow)**: Python Imaging Library, used for stitching track spectrograms.
+- **[RapidFuzz](https://github.com/rapidfuzz/RapidFuzz)**: Rapid fuzzy string matching.
+- **[requests](https://github.com/psf/requests)**: Simple yet elegant HTTP library for Python.
+- **[mutagen](https://github.com/quodlibet/mutagen)**: Python module to handle audio metadata.
+- **[FFmpeg](https://ffmpeg.org/)**: A complete, cross-platform solution to convert audio.
+- **[SoX (Sound eXchange)](https://sox.sourceforge.net/)**: The Swiss Army knife of sound processing, used for spectrogram generation.
+- **[PyInstaller](https://github.com/pyinstaller/pyinstaller)**: Packages Python applications into standalone executables.
+
+---
 ---
 
 <a name="-中文"></a>
