@@ -107,7 +107,7 @@ TRANSLATIONS = {
         "log_push_qb_success": "    [Pipeline] 已成功推送到 qBittorrent: {name}",
         "log_pipeline_stopped": ">>> 自动处理流水线监控已停止。",
         "log_pipeline_started": ">>> 自动处理流水线监控已启动...",
-        "title": "Redacted Audio Toolbox - 三合一音乐工具箱",
+        "title": "Redacted Audio Toolbox - 音乐工具箱",
         "tab_search": "🔍 Redacted 种子搜索与下载",
         "tab_downsample": "💽 FLAC 降频与制种",
         "tab_check": "🎵 频谱检测与真假无损验证",
@@ -187,7 +187,8 @@ TRANSLATIONS = {
         "log_aafs_exception": "❌ 分析异常: {e}",
         
         # Discovery Tab
-        "tab_discovery": "跨平台发现",
+        "tab_discovery": "交叉做种 (cross-seed)",
+        "tab_seeding": "远程做种",
         "search_query": "搜索关键词:",
         "search": "搜索",
         "qq_music": "QQ音乐",
@@ -284,7 +285,7 @@ TRANSLATIONS = {
         "log_push_qb_success": "    [Pipeline] Successfully pushed to qBittorrent: {name}",
         "log_pipeline_stopped": ">>> Auto pipeline monitor stopped.",
         "log_pipeline_started": ">>> Auto pipeline monitor started...",
-        "title": "Redacted Audio Toolbox - 3-in-1 Toolkit",
+        "title": "Redacted Audio Toolbox - Toolkit",
         "tab_search": "🔍 Redacted Search & DL",
         "tab_downsample": "💽 FLAC Downsampler",
         "tab_check": "🎵 Lossless Checker",
@@ -364,7 +365,8 @@ TRANSLATIONS = {
         "log_aafs_exception": "❌ Analysis Exception: {e}",
         
         # Discovery Tab
-        "tab_discovery": "Discovery",
+        "tab_discovery": "Cross-Seeding",
+        "tab_seeding": "Remote Seeding",
         "search_query": "Search Query:",
         "search": "Search",
         "qq_music": "QQ Music",

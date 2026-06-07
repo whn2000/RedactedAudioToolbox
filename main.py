@@ -44,6 +44,7 @@ class MainApp:
         self.app_pipeline = None
         self.app5 = None
         self.app_discovery = None
+        self.app_seeding = None
             
         self.tabview = ctk.CTkTabview(self.main_frame, command=self.on_tab_changed)
         self.tabview.pack(fill=tk.BOTH, expand=True)
@@ -53,14 +54,16 @@ class MainApp:
         self.tab_name_check = _("tab_check")
         self.tab_name_pipeline = "⚙️ Pipeline"
         self.tab_name_failed = "❌ Failed Tasks"
-        self.tab_name_discovery = "🌐 " + _("tab_discovery") if _("tab_discovery") != "tab_discovery" else "🌐 Discovery"
+        self.tab_name_cross_seed = "🌐 " + _("tab_discovery") if _("tab_discovery") != "tab_discovery" else "🌐 Cross-Seeding"
+        self.tab_name_seeding = "🌐 " + _("tab_seeding") if _("tab_seeding") != "tab_seeding" else "🌐 Remote Seeding"
         
         self.tabview.add(self.tab_name_search)
         self.tabview.add(self.tab_name_downsample)
         self.tabview.add(self.tab_name_check)
         self.tabview.add(self.tab_name_pipeline)
         self.tabview.add(self.tab_name_failed)
-        self.tabview.add(self.tab_name_discovery)
+        self.tabview.add(self.tab_name_cross_seed)
+        self.tabview.add(self.tab_name_seeding)
         
         # Load the default tab immediately (Search tab)
         self.load_tab(self.tab_name_search)
@@ -89,10 +92,14 @@ class MainApp:
             if not self.app5:
                 from gui.failed_tasks_tab import FailedTasksGUI
                 self.app5 = FailedTasksGUI(self.tabview.tab(self.tab_name_failed), self.app1)
-        elif tab_name == self.tab_name_discovery:
+        elif tab_name == self.tab_name_cross_seed:
             if not self.app_discovery:
                 from gui.discovery_tab import DiscoveryTabGUI
-                self.app_discovery = DiscoveryTabGUI(self.tabview.tab(self.tab_name_discovery), core.globals.app_context, self.app1)
+                self.app_discovery = DiscoveryTabGUI(self.tabview.tab(self.tab_name_cross_seed), core.globals.app_context, self.app1)
+        elif tab_name == self.tab_name_seeding:
+            if not self.app_seeding:
+                from gui.seeding_tab import SeedingTabGUI
+                self.app_seeding = SeedingTabGUI(self.tabview.tab(self.tab_name_seeding), core.globals.app_context, self.app1)
 
     def update_ui_text(self):
         self.root.title(_("title"))

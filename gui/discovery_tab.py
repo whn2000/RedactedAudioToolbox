@@ -5,7 +5,6 @@ from typing import Callable, List
 from i18n import _
 
 from cross_seed.engine import CrossSeedEngine
-
 from gui.widgets import RedirectText
 
 class DiscoveryTabGUI:
@@ -14,12 +13,6 @@ class DiscoveryTabGUI:
         self.app_context = app_context
         self._app_ref = app_ref
 
-    @property
-    def pipeline_manager(self):
-        if self._app_ref and hasattr(self._app_ref, 'pipeline'):
-            return self._app_ref.pipeline
-        return None
-        
         # Variables
         self.source_site_var = tk.StringVar(value="OPS")
         
@@ -40,7 +33,54 @@ class DiscoveryTabGUI:
         
         self.engine = None
         
+        self.load_config()
         self.build_ui()
+
+    @property
+    def pipeline_manager(self):
+        if self._app_ref and hasattr(self._app_ref, 'pipeline'):
+            return self._app_ref.pipeline
+        return None
+
+    def load_config(self):
+        if self.app_context and self.app_context.gateway:
+            gateway = self.app_context.gateway
+            # Global config for client
+            self.qb_host_var.set(gateway.get_config("global.qb_host", "http://127.0.0.1"))
+            self.qb_port_var.set(str(gateway.get_config("global.qb_port", "8080")))
+            self.qb_user_var.set(gateway.get_config("global.qb_user", "admin"))
+            self.qb_pass_var.set(gateway.get_config("global.qb_pass", "adminadmin"))
+            
+            # Seeding specific config
+            self.client_type_var.set(gateway.get_config("seeding.client_type", "qBittorrent"))
+            self.rclone_remote_var.set(gateway.get_config("seeding.rclone_remote", ""))
+            self.rclone_config_var.set(gateway.get_config("seeding.rclone_config", ""))
+            self.save_path_var.set(gateway.get_config("seeding.save_path", "./cross_seed_torrents"))
+            self.source_site_var.set(gateway.get_config("seeding.source_site", "OPS"))
+            self.target_red.set(gateway.get_config("seeding.target_red", True))
+            self.target_ops.set(gateway.get_config("seeding.target_ops", False))
+            self.target_jps.set(gateway.get_config("seeding.target_jps", False))
+            self.target_dic.set(gateway.get_config("seeding.target_dic", False))
+
+    def save_config(self):
+        if self.app_context and self.app_context.gateway:
+            gateway = self.app_context.gateway
+            # Global client config
+            gateway.set_config("global.qb_host", self.qb_host_var.get())
+            gateway.set_config("global.qb_port", self.qb_port_var.get())
+            gateway.set_config("global.qb_user", self.qb_user_var.get())
+            gateway.set_config("global.qb_pass", self.qb_pass_var.get())
+            
+            # Seeding specific config
+            gateway.set_config("seeding.client_type", self.client_type_var.get())
+            gateway.set_config("seeding.rclone_remote", self.rclone_remote_var.get())
+            gateway.set_config("seeding.rclone_config", self.rclone_config_var.get())
+            gateway.set_config("seeding.save_path", self.save_path_var.get())
+            gateway.set_config("seeding.source_site", self.source_site_var.get())
+            gateway.set_config("seeding.target_red", self.target_red.get())
+            gateway.set_config("seeding.target_ops", self.target_ops.get())
+            gateway.set_config("seeding.target_jps", self.target_jps.get())
+            gateway.set_config("seeding.target_dic", self.target_dic.get())
         
     def build_ui(self):
         self.paned_window = tk.PanedWindow(self.parent, orient=tk.VERTICAL, sashwidth=5, bg="#333333")
@@ -50,7 +90,7 @@ class DiscoveryTabGUI:
         top_frame = ctk.CTkFrame(self.paned_window)
         self.paned_window.add(top_frame, minsize=250, stretch="always")
         
-        ctk.CTkLabel(top_frame, text="跨平台自动转种 (Cross-Seeding)", font=("", 14, "bold")).pack(anchor=tk.W, padx=10, pady=5)
+        ctk.CTkLabel(top_frame, text="跨站自动转种 (Cross-Seeding)", font=("", 14, "bold")).pack(anchor=tk.W, padx=10, pady=5)
         
         settings_frame = ctk.CTkFrame(top_frame, fg_color="transparent")
         settings_frame.pack(fill=tk.X, padx=10, pady=5)
@@ -122,6 +162,7 @@ class DiscoveryTabGUI:
             self.log("Error: 请至少选择一个目标站点。")
             return
             
+        self.save_config()
         self.btn_start.configure(state="disabled")
         self.btn_stop.configure(state="normal")
         self.log_text.delete(1.0, tk.END)
