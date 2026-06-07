@@ -347,6 +347,11 @@ class PipelineManager:
             auth_key = self.red_options.api_key
             auth_type = site_config.get("auth_type", "api_key")
             if auth_type == "cookie":
+                if "=" not in auth_key:
+                    if site_config.get("source") in ["JPS", "DIC"]:
+                        auth_key = f"PHPSESSID={auth_key}"
+                    else:
+                        auth_key = f"session={auth_key}"
                 headers = {
                     'Cookie': auth_key,
                     'User-Agent': 'EliteTMHelper_AutoUpload'
@@ -390,7 +395,11 @@ class PipelineManager:
                             self.log_main(_("log_new_torrent_link").format(link=new_link))
                             
                             self.log_main(_("log_dl_official_torrent").format(source=site_config.get("source", "RED")))
-                            dl_url = f"{api_url}?action=download&id={new_torrent_id}"
+                            if site_config.get("source") in ["DIC", "JPS"]:
+                                base_url = site_config.get("base_url", api_url.replace("/ajax.php", ""))
+                                dl_url = f"{base_url}/torrents.php?action=download&id={new_torrent_id}"
+                            else:
+                                dl_url = f"{api_url}?action=download&id={new_torrent_id}"
                             dl_resp = requests.get(dl_url, headers=headers, timeout=30)
                             
                             if dl_resp.status_code == 200 and b'd8:announce' in dl_resp.content[:50]:

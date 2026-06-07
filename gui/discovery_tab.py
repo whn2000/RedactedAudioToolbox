@@ -6,32 +6,19 @@ from i18n import _
 
 from cross_seed.engine import CrossSeedEngine
 
-class RedirectText:
-    def __init__(self, text_ctrl):
-        self.output = text_ctrl
-
-    def write(self, string):
-        def _write():
-            try:
-                yview = self.output.yview()
-                is_at_bottom = yview[1] >= 0.99
-                
-                self.output.insert(tk.END, string)
-                
-                if is_at_bottom:
-                    self.output.see(tk.END)
-            except Exception:
-                pass
-        self.output.after(0, _write)
-
-    def flush(self):
-        pass
+from gui.widgets import RedirectText
 
 class DiscoveryTabGUI:
-    def __init__(self, parent_frame: ctk.CTkFrame, app_context, pipeline_manager=None):
+    def __init__(self, parent_frame: ctk.CTkFrame, app_context, app_ref=None):
         self.parent = parent_frame
         self.app_context = app_context
-        self.pipeline_manager = pipeline_manager
+        self._app_ref = app_ref
+
+    @property
+    def pipeline_manager(self):
+        if self._app_ref and hasattr(self._app_ref, 'pipeline'):
+            return self._app_ref.pipeline
+        return None
         
         # Variables
         self.source_site_var = tk.StringVar(value="OPS")

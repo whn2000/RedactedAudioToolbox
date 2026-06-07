@@ -64,7 +64,7 @@ class CrossSeedEngine:
                         if auth_type == "cookie":
                             auth_key = options.api_key
                             if "=" not in auth_key:
-                                if site == "JPS":
+                                if site in ["JPS", "DIC"]:
                                     auth_key = f"PHPSESSID={auth_key}"
                                 else:
                                     auth_key = f"session={auth_key}"

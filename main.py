@@ -5,11 +5,6 @@ import customtkinter as ctk
 
 from dependency_manager import check_and_install_dependencies
 from gui.search_tab import AppGUI as RedactedFinderGUI
-from flac_downsampler import FlacDownsamplerGUI
-from lossless_checker import LosslessCheckerGUI
-from gui.failed_tasks_tab import FailedTasksGUI
-from gui.discovery_tab import DiscoveryTabGUI
-from gui.pipeline_tab import PipelineTabGUI
 
 from i18n import _, set_language, CURRENT_LANG, subscribe_lang_change
 from core.context import AppContext
@@ -43,7 +38,14 @@ class MainApp:
         if self.tabview:
             self.tabview.destroy()
             
-        self.tabview = ctk.CTkTabview(self.main_frame)
+        self.app1 = None
+        self.app2 = None
+        self.app3 = None
+        self.app_pipeline = None
+        self.app5 = None
+        self.app_discovery = None
+            
+        self.tabview = ctk.CTkTabview(self.main_frame, command=self.on_tab_changed)
         self.tabview.pack(fill=tk.BOTH, expand=True)
         
         self.tab_name_search = _("tab_search")
@@ -60,13 +62,37 @@ class MainApp:
         self.tabview.add(self.tab_name_failed)
         self.tabview.add(self.tab_name_discovery)
         
-        self.app1 = RedactedFinderGUI(self.tabview.tab(self.tab_name_search))
-        self.app2 = FlacDownsamplerGUI(self.tabview.tab(self.tab_name_downsample))
-        self.app3 = LosslessCheckerGUI(self.tabview.tab(self.tab_name_check))
-        # 传入 self.app1 引用，让各标签页动态获取 pipeline（解决初始化时永远 None 的问题）
-        self.app_pipeline = PipelineTabGUI(self.tabview.tab(self.tab_name_pipeline), self.app1)
-        self.app5 = FailedTasksGUI(self.tabview.tab(self.tab_name_failed), self.app1)
-        self.app_discovery = DiscoveryTabGUI(self.tabview.tab(self.tab_name_discovery), core.globals.app_context, getattr(self.app1, 'pipeline', None))
+        # Load the default tab immediately (Search tab)
+        self.load_tab(self.tab_name_search)
+
+    def on_tab_changed(self):
+        current_tab = self.tabview.get()
+        self.load_tab(current_tab)
+
+    def load_tab(self, tab_name):
+        if tab_name == self.tab_name_search:
+            if not self.app1:
+                self.app1 = RedactedFinderGUI(self.tabview.tab(self.tab_name_search))
+        elif tab_name == self.tab_name_downsample:
+            if not self.app2:
+                from flac_downsampler import FlacDownsamplerGUI
+                self.app2 = FlacDownsamplerGUI(self.tabview.tab(self.tab_name_downsample))
+        elif tab_name == self.tab_name_check:
+            if not self.app3:
+                from lossless_checker import LosslessCheckerGUI
+                self.app3 = LosslessCheckerGUI(self.tabview.tab(self.tab_name_check))
+        elif tab_name == self.tab_name_pipeline:
+            if not self.app_pipeline:
+                from gui.pipeline_tab import PipelineTabGUI
+                self.app_pipeline = PipelineTabGUI(self.tabview.tab(self.tab_name_pipeline), self.app1)
+        elif tab_name == self.tab_name_failed:
+            if not self.app5:
+                from gui.failed_tasks_tab import FailedTasksGUI
+                self.app5 = FailedTasksGUI(self.tabview.tab(self.tab_name_failed), self.app1)
+        elif tab_name == self.tab_name_discovery:
+            if not self.app_discovery:
+                from gui.discovery_tab import DiscoveryTabGUI
+                self.app_discovery = DiscoveryTabGUI(self.tabview.tab(self.tab_name_discovery), core.globals.app_context, self.app1)
 
     def update_ui_text(self):
         self.root.title(_("title"))

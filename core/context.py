@@ -64,8 +64,9 @@ class AppContext:
         # 1. 强制执行迁移策略（带安全轮转备份）
         self.migration.run_migrations()
         
-        # 2. 强力清空上一次遗留的临时数据
-        self.cache.init_cleanup()
+        # 2. 异步清空上一次遗留的临时数据和执行空间淘汰，避免阻塞主线程
+        import threading
+        threading.Thread(target=self.cache.init_cleanup, daemon=True).start()
         
         # 3. 播报核心准备就绪 (触发 app_state_changed 广播)
         from .state_manager import AppState

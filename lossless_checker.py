@@ -314,27 +314,7 @@ def process_album(album_dir, output_dir=None, fast_mode=False):
 
 import customtkinter as ctk
 
-class RedirectText:
-    def __init__(self, text_ctrl):
-        self.output = text_ctrl
-
-    def write(self, string):
-        def _write():
-            try:
-                yview = self.output.yview()
-                is_at_bottom = yview[1] >= 0.99
-                
-                self.output.insert(tk.END, string)
-                
-                if is_at_bottom:
-                    self.output.see(tk.END)
-            except Exception:
-                pass
-        # 强制将写入操作发送到主线程，防止并发打印导致 Tkinter 崩溃或产生大量空白
-        self.output.after(0, _write)
-
-    def flush(self):
-        pass
+from gui.widgets import RedirectText
 
 class LosslessCheckerGUI:
     def __init__(self, parent):

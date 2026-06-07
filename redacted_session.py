@@ -1,4 +1,4 @@
-﻿"""
+"""
 RedactedSession - 统一 API 会话管理
 
 从 elitetmhelper2.py 中提取，职责是管理所有站点(Gazelle)的 HTTP 会话、
@@ -58,7 +58,7 @@ class RedactedSession(requests.Session):
             if "=" not in auth_key:
                 auth_key = (
                     f"PHPSESSID={auth_key}"
-                    if site_config.get("source") == "JPS"
+                    if site_config.get("source") in ["JPS", "DIC"]
                     else f"session={auth_key}"
                 )
             self.headers['Cookie'] = auth_key

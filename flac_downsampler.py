@@ -334,21 +334,7 @@ def process_batch_with_options(base_dir, tracker_url, source_flag, flac_out=True
 import customtkinter as ctk
 from i18n import _
 
-class RedirectText:
-    def __init__(self, text_ctrl):
-        self.output = text_ctrl
-
-    def write(self, string):
-        def _write():
-            try:
-                self.output.insert(tk.END, string)
-                self.output.see(tk.END)
-            except Exception:
-                pass
-        self.output.after(0, _write)
-
-    def flush(self):
-        pass
+from gui.widgets import RedirectText
 
 class FlacDownsamplerGUI:
     def __init__(self, parent):

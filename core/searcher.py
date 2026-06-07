@@ -356,7 +356,7 @@ def perform_search(options, abort_flag):
     auth_type = site_config.get("auth_type", "api_key")
     if auth_type == "cookie":
         if "=" not in auth_key:
-            if site_config.get("source") == "JPS":
+            if site_config.get("source") in ["JPS", "DIC"]:
                 auth_key = f"PHPSESSID={auth_key}"
             else:
                 auth_key = f"session={auth_key}"
