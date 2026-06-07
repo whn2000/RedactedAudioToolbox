@@ -24,3 +24,5 @@ EliteTMHelper2.spec
 *.m3u8
 /build
 *.spec
+_build/
+release/

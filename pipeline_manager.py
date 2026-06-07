@@ -22,6 +22,9 @@ class PipelineManager:
         self.qb = QbittorrentClient(qb_host, qb_port, qb_user, qb_pass)
         self.red_session = red_session
         self.red_options = red_options
+        if not self.red_session and self.red_options:
+            from redacted_session import RedactedSession
+            self.red_session = RedactedSession.from_options(self.red_options)
         self.log_main = log_main
         self.log_process = log_process
         self.log_check = log_check
@@ -343,7 +346,12 @@ class PipelineManager:
                 remaster_data['remaster_catalogue_number'] = str(r_cat)
 
             # 执行循环上传
-            upload_url = f"{api_url}?action=upload"
+            site_source = site_config.get("source", "RED")
+            if site_source in ["JPS", "DIC"]:
+                upload_url = f"{base_url}/upload.php"
+            else:
+                upload_url = f"{api_url}?action=upload"
+
             auth_key = self.red_options.api_key
             auth_type = site_config.get("auth_type", "api_key")
             if auth_type == "cookie":
@@ -383,24 +391,32 @@ class PipelineManager:
                 self.log_main(f"    [Pipeline] 正在发布: {up['dir_name']} ({up['format']} / {up['bitrate']})")
                 with open(up['torrent_path'], 'rb') as f:
                     files = {'file_input': (up['torrent_path'].name, f, 'application/x-bittorrent')}
-                    resp = requests.post(upload_url, headers=headers, data=upload_data, files=files, timeout=30)
+                    if self.red_session:
+                        resp = self.red_session.post(upload_url, data=upload_data, files=files, timeout=30)
+                    else:
+                        resp = requests.post(upload_url, headers=headers, data=upload_data, files=files, timeout=30)
                     
                 if resp.status_code == 200:
-                    try:
-                        resp_json = resp.json()
-                        if resp_json.get('status') == 'success':
-                            new_torrent_id = resp_json['response'].get('torrentid') or resp_json['response'].get('torrentId')
+                    if site_source in ["JPS", "DIC"]:
+                        import re
+                        match = re.search(r'torrentid=(\d+)', resp.url)
+                        if match:
+                            new_torrent_id = match.group(1)
+                            group_match = re.search(r'id=(\d+)', resp.url)
+                            if group_match:
+                                group_id = group_match.group(1)
                             new_link = f"{base_url}/torrents.php?id={group_id}&torrentid={new_torrent_id}"
                             self.log_main(_("log_upload_success"))
                             self.log_main(_("log_new_torrent_link").format(link=new_link))
                             
                             self.log_main(_("log_dl_official_torrent").format(source=site_config.get("source", "RED")))
-                            if site_config.get("source") in ["DIC", "JPS"]:
-                                base_url = site_config.get("base_url", api_url.replace("/ajax.php", ""))
-                                dl_url = f"{base_url}/torrents.php?action=download&id={new_torrent_id}"
+                            base_url = site_config.get("base_url", api_url.replace("/ajax.php", ""))
+                            dl_url = f"{base_url}/torrents.php?action=download&id={new_torrent_id}"
+                            
+                            if self.red_session:
+                                dl_resp = self.red_session.get(dl_url, timeout=30)
                             else:
-                                dl_url = f"{api_url}?action=download&id={new_torrent_id}"
-                            dl_resp = requests.get(dl_url, headers=headers, timeout=30)
+                                dl_resp = requests.get(dl_url, headers=headers, timeout=30)
                             
                             if dl_resp.status_code == 200 and b'd8:announce' in dl_resp.content[:50]:
                                 official_torrent = album_dir.parent / f"{up['dir_name']}_official.torrent"
@@ -410,15 +426,56 @@ class PipelineManager:
                                 self.qb.add_torrent(str(official_torrent), save_path=str(album_dir.parent), category="red_seeding")
                             else:
                                 self.log_main(_("log_dl_official_fail"))
-                                
                         else:
-                            self.log_main(_("log_upload_api_fail").format(resp=resp_json))
+                            self.log_main(f"    [Pipeline] ❌ 上传失败，未成功跳转到种子页面。当前页面: {resp.url}")
+                            error_match = re.search(r'<p[^>]*class="warning"[^>]*>(.*?)</p>', resp.text, re.DOTALL)
+                            if not error_match:
+                                error_match = re.search(r'<p[^>]*style="color:\s*red;?"[^>]*>(.*?)</p>', resp.text, re.DOTALL)
+                            if error_match:
+                                err_text = re.sub('<[^<]+?>', '', error_match.group(1)).strip()
+                                self.log_main(f"    [Pipeline] 错误提示: {err_text}")
+                            else:
+                                self.log_main(f"    [Pipeline] 响应前 500 字符: {resp.text[:500]}")
                             if idx == 0: self._mark_failed(qb_torrent_info)
                             break
-                    except Exception as e:
-                        self.log_main(_("log_upload_json_parse_fail").format(e=e, text=resp.text[:200]))
-                        if idx == 0: self._mark_failed(qb_torrent_info)
-                        break
+                    else:
+                        try:
+                            resp_json = resp.json()
+                            if resp_json.get('status') == 'success':
+                                new_torrent_id = resp_json['response'].get('torrentid') or resp_json['response'].get('torrentId')
+                                new_link = f"{base_url}/torrents.php?id={group_id}&torrentid={new_torrent_id}"
+                                self.log_main(_("log_upload_success"))
+                                self.log_main(_("log_new_torrent_link").format(link=new_link))
+                                
+                                self.log_main(_("log_dl_official_torrent").format(source=site_config.get("source", "RED")))
+                                if site_config.get("source") in ["DIC", "JPS"]:
+                                    base_url = site_config.get("base_url", api_url.replace("/ajax.php", ""))
+                                    dl_url = f"{base_url}/torrents.php?action=download&id={new_torrent_id}"
+                                else:
+                                    dl_url = f"{api_url}?action=download&id={new_torrent_id}"
+                                
+                                if self.red_session:
+                                    dl_resp = self.red_session.get(dl_url, timeout=30)
+                                else:
+                                    dl_resp = requests.get(dl_url, headers=headers, timeout=30)
+                                
+                                if dl_resp.status_code == 200 and b'd8:announce' in dl_resp.content[:50]:
+                                    official_torrent = album_dir.parent / f"{up['dir_name']}_official.torrent"
+                                    official_torrent.write_bytes(dl_resp.content)
+                                    
+                                    self.log_process(_("log_add_official_to_qb"))
+                                    self.qb.add_torrent(str(official_torrent), save_path=str(album_dir.parent), category="red_seeding")
+                                else:
+                                    self.log_main(_("log_dl_official_fail"))
+                                    
+                            else:
+                                self.log_main(_("log_upload_api_fail").format(resp=resp_json))
+                                if idx == 0: self._mark_failed(qb_torrent_info)
+                                break
+                        except Exception as e:
+                            self.log_main(_("log_upload_json_parse_fail").format(e=e, text=resp.text[:200]))
+                            if idx == 0: self._mark_failed(qb_torrent_info)
+                            break
                 else:
                     self.log_main(_("log_upload_http_fail").format(code=resp.status_code))
                     self.log_main(f"    [Pipeline] {resp.text[:500]}")
@@ -484,13 +541,16 @@ class PipelineManager:
                 
             # 执行全新上传
             for site in target_sites:
-                site_config = getattr(self.red_options, 'site_config', {})
-                # Note: Real implementation would need to fetch the specific API URL and Auth for the target site from gateway
-                # For this MVP, we use the current default api_url
+                from core.site_config import SITE_CONFIGS
+                site_config = SITE_CONFIGS.get(site, getattr(self.red_options, 'site_config', {}))
+                base_url = site_config.get("base_url", "https://redacted.sh")
                 api_url = site_config.get("api_url", "https://redacted.sh/ajax.php")
                 auth_key = self.red_options.api_key
                 
-                upload_url = f"{api_url}?action=upload"
+                if site in ["JPS", "DIC"]:
+                    upload_url = f"{base_url}/upload.php"
+                else:
+                    upload_url = f"{api_url}?action=upload"
                 headers = {
                     'Authorization': auth_key,
                     'User-Agent': 'EliteTMHelper_AutoUpload'
@@ -515,22 +575,38 @@ class PipelineManager:
                 self.log_main(f"    [Pipeline] 正在向 {site} 全新发布: {album_dir.name}")
                 with open(torrent_path, 'rb') as f:
                     files = {'file_input': (torrent_path.name, f, 'application/x-bittorrent')}
-                    import requests
-                    resp = requests.post(upload_url, headers=headers, data=upload_data, files=files, timeout=30)
+                    if self.red_session:
+                        resp = self.red_session.post(upload_url, data=upload_data, files=files, timeout=30)
+                    else:
+                        resp = requests.post(upload_url, headers=headers, data=upload_data, files=files, timeout=30)
                 
                 if resp.status_code == 200:
-                    try:
-                        resp_json = resp.json()
-                        if resp_json.get('status') == 'success':
+                    if site in ["JPS", "DIC"]:
+                        import re
+                        match = re.search(r'torrentid=(\d+)', resp.url)
+                        if match:
                             self.log_main(f"    [Pipeline] {site} 上传成功！")
                             if self.db and res_id:
                                 self.db.execute("UPDATE discovery_results SET status = 'uploaded' WHERE id = ?", (res_id,))
                         else:
-                            self.log_main(f"    [Pipeline] {site} API 返回错误: {resp_json}")
+                            self.log_main(f"    [Pipeline] {site} 上传失败，跳转 URL 未包含 torrentid")
                             if self.db and res_id:
                                 self.db.execute("UPDATE discovery_results SET status = 'failed' WHERE id = ?", (res_id,))
-                    except Exception as e:
-                        self.log_main(f"    [Pipeline] 解析 {site} 响应失败: {e}")
+                    else:
+                        try:
+                            resp_json = resp.json()
+                            if resp_json.get('status') == 'success':
+                                self.log_main(f"    [Pipeline] {site} 上传成功！")
+                                if self.db and res_id:
+                                    self.db.execute("UPDATE discovery_results SET status = 'uploaded' WHERE id = ?", (res_id,))
+                            else:
+                                self.log_main(f"    [Pipeline] {site} API 返回错误: {resp_json}")
+                                if self.db and res_id:
+                                    self.db.execute("UPDATE discovery_results SET status = 'failed' WHERE id = ?", (res_id,))
+                        except Exception as e:
+                            self.log_main(f"    [Pipeline] 解析 {site} 响应失败: {e}")
+                            if self.db and res_id:
+                                self.db.execute("UPDATE discovery_results SET status = 'failed' WHERE id = ?", (res_id,))
                 else:
                     self.log_main(f"    [Pipeline] {site} HTTP 错误: {resp.status_code}")
                     if self.db and res_id:
