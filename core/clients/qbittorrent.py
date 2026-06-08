@@ -1,9 +1,10 @@
 import requests
 from pathlib import Path
-import time
+from typing import List, Dict, Any
+from .base import BaseTorrentClient
 
-class QbittorrentClient:
-    def __init__(self, host, port, username, password):
+class QbittorrentClient(BaseTorrentClient):
+    def __init__(self, host: str, port: Any, username: str, password: str):
         self.host = host.rstrip('/')
         if not self.host.startswith('http'):
             self.host = 'http://' + self.host
@@ -14,7 +15,7 @@ class QbittorrentClient:
         self.base_url = f"{self.host}:{self.port}"
         self.is_logged_in = False
 
-    def login(self):
+    def login(self) -> bool:
         url = f"{self.base_url}/api/v2/auth/login"
         try:
             resp = self.session.post(url, data={
@@ -29,7 +30,7 @@ class QbittorrentClient:
             print(f"qBittorrent 登录失败: {e}")
             return False
 
-    def add_torrent(self, torrent_path, save_path=None, category="red_auto"):
+    def add_torrent(self, torrent_path: str, save_path: str, category: str = "red_auto") -> bool:
         if not self.is_logged_in and not self.login():
             return False
             
@@ -49,25 +50,48 @@ class QbittorrentClient:
             
         try:
             resp = self.session.post(url, files=files, data=data)
+            if resp.status_code == 403: # Session expired
+                if self.login():
+                    path = Path(torrent_path)
+                    files = {'torrents': (path.name, path.open('rb'), 'application/x-bittorrent')}
+                    resp = self.session.post(url, files=files, data=data)
             return resp.status_code == 200
         except Exception as e:
             print(f"添加种子到 qBittorrent 失败: {e}")
             return False
 
-    def get_torrents(self, category="red_auto"):
+    def get_torrents(self, category: str = None) -> List[Dict[str, Any]]:
         if not self.is_logged_in and not self.login():
             return []
             
         url = f"{self.base_url}/api/v2/torrents/info"
+        params = {}
+        if category:
+            params['category'] = category
+            
         try:
-            resp = self.session.get(url, params={'category': category})
+            resp = self.session.get(url, params=params)
+            if resp.status_code == 403: # Session expired
+                if self.login():
+                    resp = self.session.get(url, params=params)
+            
             if resp.status_code == 200:
-                return resp.json()
+                results = []
+                for t in resp.json():
+                    # 确保返回格式标准化，统一包含 name, hash, save_path, tracker 键
+                    results.append({
+                        "name": t.get("name", ""),
+                        "hash": t.get("hash", ""),
+                        "save_path": t.get("save_path", t.get("savepath", "")),
+                        "tracker": t.get("tracker", "")
+                    })
+                return results
             return []
-        except Exception:
+        except Exception as e:
+            print(f"获取 qBittorrent 种子列表失败: {e}")
             return []
 
-    def set_category(self, hashes, category):
+    def set_category(self, hashes: str, category: str) -> bool:
         if not self.is_logged_in and not self.login():
             return False
             

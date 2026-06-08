@@ -97,7 +97,7 @@ def test_mqa_syncword_detection():
 import os
 from unittest.mock import MagicMock, patch
 from core.log_checker import parse_log_file, verify_album_against_log
-from core.transmission_client import TransmissionClient
+from core.clients.transmission import TransmissionClient
 
 def test_log_checker_parse_eac():
     eac_log = """Exact Audio Copy V1.6 from 23. October 2020
@@ -156,7 +156,7 @@ Track  1
         if os.path.exists(temp_log_path):
             os.remove(temp_log_path)
 
-@patch('core.transmission_client.Client')
+@patch('core.clients.transmission.Client')
 def test_transmission_client_add_torrent(mock_client_class):
     mock_client = MagicMock()
     mock_client_class.return_value = mock_client

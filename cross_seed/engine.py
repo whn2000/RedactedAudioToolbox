@@ -3,8 +3,7 @@ import threading
 import json
 from pathlib import Path
 from typing import List, Dict, Any, Callable
-from qbittorrent_client import QbittorrentClient
-from core.transmission_client import TransmissionClient
+from core.clients.factory import create_client
 from cross_seed.red_checker import RedChecker
 from cross_seed.metadata import MetadataFetcher
 import traceback
@@ -20,10 +19,8 @@ class CrossSeedEngine:
         self.rclone_config = rclone_config
         self.save_path = save_path
         
-        if client_type == "Transmission":
-            self.client = TransmissionClient(qb_host, qb_port, qb_user, qb_pass)
-        else:
-            self.client = QbittorrentClient(qb_host, qb_port, qb_user, qb_pass)
+        from core.clients.factory import create_client
+        self.client = create_client(client_type, qb_host, qb_port, qb_user, qb_pass)
         self.metadata_fetcher = MetadataFetcher()
         self.is_running = False
         self.thread = None
@@ -244,16 +241,18 @@ class CrossSeedEngine:
                     if resp_json.get('status') == 'success':
                         self.log(f"Successfully cross-seeded to {site}!")
                         
-                        # Upload using rclone if remote path is provided
-                        if self.rclone_remote:
-                            from core.rclone_helper import rclone_copy
-                            rclone_copy(str(data_path), self.rclone_remote, self.rclone_config)
+                        # 使用 SeedingManager 集中管理远程/本地挂载和上传
+                        from core.seeding.seeding_manager import SeedingManager
+                        seeding_mgr = SeedingManager(self.app_context.gateway if self.app_context else None)
                         
-                        # Add to torrent client to seed
-                        if self.client_type == "Transmission":
-                            self.client.add_torrent(str(out_torrent_path), save_path=save_path)
-                        else:
-                            self.client.add_torrent(str(out_torrent_path), save_path=save_path, category=f"{site.lower()}_seeding")
+                        use_remote = bool(self.rclone_remote)
+                        seeding_mgr.seed_torrent(
+                            local_path=str(data_path),
+                            torrent_path=str(out_torrent_path),
+                            use_remote=use_remote,
+                            remote_save_path=save_path,
+                            on_progress=self.log
+                        )
                     else:
                         self.log(f"Upload API failed on {site}: {resp_json}")
                 else:

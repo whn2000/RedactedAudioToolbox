@@ -123,12 +123,15 @@ A specialized analytical layer to detect modern hidden anomalies in high-resolut
 
 ---
 
-### 🌐 Cross-Seed & Remote Seeding Client Support
+### 🌐 Cross-Seed & Remote Seeding Client Support (High-Cohesion Refactored)
 
-- **Seeding Client Integration**: Supports local injection into **qBittorrent** and **Transmission** client.
-- **Remote Seeding (rclone)**:
-  - Automates uploading the newly transcoded folder/torrent to a remote Seedbox via `rclone` subprocess calls.
-  - Automatically adds the uploaded torrent to your remote client (qBittorrent/Transmission) for immediate seeding.
+The remote seeding architecture has been fully refactored to achieve high-cohesion and low-coupling:
+
+- **Decoupled Configuration**: Client connection parameters for remote seeding (`seeding.*`) are fully separated from the local download/monitoring client (`global.*`). You can monitor local downloads and seed to your remote Seedbox simultaneously without credential conflicts.
+- **Unified Client Interface & Factory**: Supports both **qBittorrent** and **Transmission** clients through a unified abstract interface (`BaseTorrentClient`) and factory pattern. Output dictionary structure is strictly standardized across backends.
+- **Non-blocking Popen Uploads with Real-time Progress**: Data uploads via `rclone` are executed asynchronously using non-blocking sub-processes. The system parses `rclone --progress` streams in real time to display upload percentage, current transfer speed, and estimated time of arrival (ETA) directly in the GUI logs.
+- **Core Pipeline Integration**: The main automated search-downsample-upload pipeline now natively supports remote seeding. When `rclone` is configured, newly transcoded albums and official torrents are automatically transferred and injected directly to your remote Seedbox.
+- **Cross-Seeding & Manual Seeding Support**: Both cross-seeding and manual seeding modules are unified under a central `SeedingManager` service class for cleaner, more reliable executions.
 
 ---
 
@@ -302,12 +305,15 @@ This project is built upon and inspired by the following amazing open-source pro
 
 ---
 
-### 🌐 跨站做种与远程做种支持
+### 🌐 跨站做种与远程做种支持（高内聚低耦合重构）
 
-- **多客户端支持**：支持本地 qBittorrent 和 **Transmission** 做种客户端接入。
-- **rclone 远程做种**：
-  - 在本地完成转码和制种后，自动调用系统 `rclone` 命令将转码数据包和种子文件同步到远程 Seedbox 服务器。
-  - 自动将种子推送到远程种子客户端（qB/Transmission）并自动开始做种。
+项目对远程做种模块进行了彻底重构，引入了统一接口和管理器架构，实现了**高内聚低耦合**的设计：
+
+- **配置解耦隔离**：远程做种/转种的客户端连接配置（`seeding.*`）与全局本地下载监控配置（`global.*`）完全分离。您可以同时用本地客户端下载 24bit 音频，并用远程 Seedbox 进行做种，彻底解决了账号冲突覆写的问题。
+- **统一客户端接口与工厂**：通过统一的 `BaseTorrentClient` 抽象层和客户端工厂，完美屏蔽了 **qBittorrent** 和 **Transmission** 客户端的底层差异，统一了返回的种子字典数据结构。
+- **非阻塞 Popen 上传与实时进度可视化**：`rclone` 文件同步流程改用异步非阻塞的 `subprocess.Popen` 调用，通过正则表达式实时解析 `--progress` 输出，将已传百分比、即时上传速率和 ETA 剩余时间动态呈现在 GUI 日志控制台。
+- **自动流水线深度整合**：最核心的“搜索-转码-发布”自动流水线已原生支持远程做种挂载。当配置好远程做种环境后，发布成功的新种子和 16-bit 转码文件夹会自动执行 rclone 同步并直接推送到您的远程 Seedbox 做种端，实现一键挂机。
+- **手动做种与跨站转种的底层统合**：手动远程做种标签页及 Cross-Seeding 自动转种引擎在底层全部接入中央 `SeedingManager` 业务服务层，精简代码，保障执行高可靠。
 
 ---
 

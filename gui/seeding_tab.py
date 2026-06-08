@@ -4,33 +4,9 @@ import time
 import tkinter as tk
 import customtkinter as ctk
 import threading
-import contextlib
 from pathlib import Path
 from tkinter import filedialog, messagebox
-
-from core.rclone_helper import rclone_copy
-
-class LogRedirector:
-    """线程安全的日志重定向器，用于捕获 print 输出到日志文本框"""
-    def __init__(self, log_widget, tk_parent):
-        self.log_widget = log_widget
-        self.tk_parent = tk_parent
-
-    def write(self, string):
-        if string and string.strip():
-            # 自动添加当前时间戳
-            timestamp = time.strftime("%H:%M:%S")
-            formatted = f"[{timestamp}] {string.strip()}\n"
-            def _write():
-                try:
-                    self.log_widget.insert(tk.END, formatted)
-                    self.log_widget.see(tk.END)
-                except Exception:
-                    pass
-            self.tk_parent.after(0, _write)
-
-    def flush(self):
-        pass
+from core.seeding.seeding_manager import SeedingManager
 
 class SeedingTabGUI:
     def __init__(self, parent_frame: ctk.CTkFrame, app_context, app_ref=None):
@@ -58,11 +34,11 @@ class SeedingTabGUI:
     def load_config(self):
         if self.app_context and self.app_context.gateway:
             gateway = self.app_context.gateway
-            # Global client config (shared with search_tab)
-            self.qb_host_var.set(gateway.get_config("global.qb_host", "http://127.0.0.1"))
-            self.qb_port_var.set(str(gateway.get_config("global.qb_port", "8080")))
-            self.qb_user_var.set(gateway.get_config("global.qb_user", "admin"))
-            self.qb_pass_var.set(gateway.get_config("global.qb_pass", "adminadmin"))
+            # 优先读取独立的做种客户端配置，如果没有则从全局 qb 连接配置继承
+            self.qb_host_var.set(gateway.get_config("seeding.host", gateway.get_config("global.qb_host", "http://127.0.0.1")))
+            self.qb_port_var.set(str(gateway.get_config("seeding.port", gateway.get_config("global.qb_port", "8080"))))
+            self.qb_user_var.set(gateway.get_config("seeding.user", gateway.get_config("global.qb_user", "admin")))
+            self.qb_pass_var.set(gateway.get_config("seeding.pass", gateway.get_config("global.qb_pass", "adminadmin")))
             
             # Seeding config
             self.client_type_var.set(gateway.get_config("seeding.client_type", "qBittorrent"))
@@ -77,21 +53,21 @@ class SeedingTabGUI:
     def save_config(self):
         if self.app_context and self.app_context.gateway:
             gateway = self.app_context.gateway
-            # Global client config
-            gateway.set_config("global.qb_host", self.qb_host_var.get())
-            gateway.set_config("global.qb_port", self.qb_port_var.get())
-            gateway.set_config("global.qb_user", self.qb_user_var.get())
-            gateway.set_config("global.qb_pass", self.qb_pass_var.get())
+            # 保存独立的做种客户端配置
+            gateway.set_config("seeding.host", self.qb_host_var.get().strip())
+            gateway.set_config("seeding.port", self.qb_port_var.get().strip())
+            gateway.set_config("seeding.user", self.qb_user_var.get().strip())
+            gateway.set_config("seeding.pass", self.qb_pass_var.get().strip())
             
             # Seeding config
             gateway.set_config("seeding.client_type", self.client_type_var.get())
-            gateway.set_config("seeding.rclone_remote", self.rclone_remote_var.get())
-            gateway.set_config("seeding.rclone_config", self.rclone_config_var.get())
+            gateway.set_config("seeding.rclone_remote", self.rclone_remote_var.get().strip())
+            gateway.set_config("seeding.rclone_config", self.rclone_config_var.get().strip())
             
             # Manual seeding config
-            gateway.set_config("seeding.manual_local_path", self.local_data_var.get())
-            gateway.set_config("seeding.manual_torrent_path", self.torrent_path_var.get())
-            gateway.set_config("seeding.manual_remote_save_path", self.remote_save_var.get())
+            gateway.set_config("seeding.manual_local_path", self.local_data_var.get().strip())
+            gateway.set_config("seeding.manual_torrent_path", self.torrent_path_var.get().strip())
+            gateway.set_config("seeding.manual_remote_save_path", self.remote_save_var.get().strip())
 
     def build_ui(self):
         # UI utilizes a PanedWindow split vertically
@@ -119,17 +95,17 @@ class SeedingTabGUI:
         ctk.CTkLabel(conn_grid, text="做种客户端:").grid(row=0, column=0, sticky=tk.W, pady=4, padx=5)
         ctk.CTkOptionMenu(conn_grid, variable=self.client_type_var, values=["qBittorrent", "Transmission"], width=130).grid(row=0, column=1, sticky=tk.W, pady=4, padx=5)
         
-        ctk.CTkLabel(conn_grid, text="连接地址(Host):").grid(row=0, column=2, sticky=tk.W, pady=4, padx=5)
+        ctk.CTkLabel(conn_grid, text="做种地址(Host):").grid(row=0, column=2, sticky=tk.W, pady=4, padx=5)
         ctk.CTkEntry(conn_grid, textvariable=self.qb_host_var, width=150, placeholder_text="e.g. http://127.0.0.1").grid(row=0, column=3, sticky=tk.W, pady=4, padx=5)
         
-        ctk.CTkLabel(conn_grid, text="端口(Port):").grid(row=0, column=4, sticky=tk.W, pady=4, padx=5)
+        ctk.CTkLabel(conn_grid, text="做种端口(Port):").grid(row=0, column=4, sticky=tk.W, pady=4, padx=5)
         ctk.CTkEntry(conn_grid, textvariable=self.qb_port_var, width=70, placeholder_text="8080").grid(row=0, column=5, sticky=tk.W, pady=4, padx=5)
         
         # Row 2: Username and password
-        ctk.CTkLabel(conn_grid, text="账户(User):").grid(row=1, column=0, sticky=tk.W, pady=4, padx=5)
+        ctk.CTkLabel(conn_grid, text="做种账户(User):").grid(row=1, column=0, sticky=tk.W, pady=4, padx=5)
         ctk.CTkEntry(conn_grid, textvariable=self.qb_user_var, width=130).grid(row=1, column=1, sticky=tk.W, pady=4, padx=5)
         
-        ctk.CTkLabel(conn_grid, text="密码(Pass):").grid(row=1, column=2, sticky=tk.W, pady=4, padx=5)
+        ctk.CTkLabel(conn_grid, text="做种密码(Pass):").grid(row=1, column=2, sticky=tk.W, pady=4, padx=5)
         ctk.CTkEntry(conn_grid, textvariable=self.qb_pass_var, width=150, show="*").grid(row=1, column=3, sticky=tk.W, pady=4, padx=5)
         
         # Row 3: rclone Remote and configuration path
@@ -240,51 +216,27 @@ class SeedingTabGUI:
         threading.Thread(target=self._run_seeding_thread, args=(local_path, torrent_path, remote_save_path), daemon=True).start()
 
     def _run_seeding_thread(self, local_path, torrent_path, remote_save_path):
-        rclone_remote = self.rclone_remote_var.get().strip()
-        rclone_config = self.rclone_config_var.get().strip()
-        
-        self.log("🚀 启动手动远程做种流程...")
-        
-        # Step 1: Upload data if rclone remote is configured
-        if rclone_remote:
-            self.log(f"📦 [rclone] 开始上传数据: {Path(local_path).name} -> {rclone_remote}")
-            redirector = LogRedirector(self.log_text, self.parent)
-            
-            with contextlib.redirect_stdout(redirector), contextlib.redirect_stderr(redirector):
-                success = rclone_copy(local_path, rclone_remote, rclone_config if rclone_config else None)
-                
-            if not success:
-                self.log("❌ [rclone] 数据上传失败，已终止任务。")
-                self.parent.after(0, lambda: self.btn_start.configure(state=tk.NORMAL))
-                return
-            self.log("✅ [rclone] 数据上传并同步完成。")
-        else:
-            self.log("⚠️ 未设置 rclone 远程路径，将跳过文件上传步骤，直接往客户端添加种子。")
-            
-        # Step 2: Inject torrent to target client
-        client_type = self.client_type_var.get()
-        host = self.qb_host_var.get().strip()
-        port = self.qb_port_var.get().strip()
-        user = self.qb_user_var.get().strip()
-        password = self.qb_pass_var.get().strip()
-        
-        self.log(f"🔄 [客户端] 正在连接 {client_type} 做种客户端 ({host}:{port})...")
+        self.log("🚀 启动手动同步与做种流程...")
         try:
-            if client_type == "Transmission":
-                from core.transmission_client import TransmissionClient
-                client = TransmissionClient(host, port, user, password)
-            else:
-                from qbittorrent_client import QbittorrentClient
-                client = QbittorrentClient(host, port, user, password)
-                
-            self.log(f"📥 [客户端] 正在推送种子，远程下载保存目录为: {remote_save_path}")
-            success = client.add_torrent(str(torrent_path), save_path=remote_save_path)
+            # 高内聚重构：直接实例化 SeedingManager 调度整个任务，免去 GUI 的 rclone_copy 及 Client 依赖
+            manager = SeedingManager(self.app_context.gateway)
+            
+            rclone_remote = self.rclone_remote_var.get().strip()
+            use_remote = bool(rclone_remote)
+            
+            success = manager.seed_torrent(
+                local_path=local_path,
+                torrent_path=torrent_path,
+                use_remote=use_remote,
+                remote_save_path=remote_save_path,
+                on_progress=self.log
+            )
             
             if success:
-                self.log(f"🎉 [客户端] 做种任务注册成功！已在 {client_type} 中加入做种。")
+                self.log("🎉 任务顺利完成！")
             else:
-                self.log(f"❌ [客户端] 做种任务添加失败，请查看客户端连接是否正常。")
+                self.log("❌ 任务执行失败，请检查上面日志。")
         except Exception as e:
-            self.log(f"❌ [客户端] 连接或添加种子出现异常: {e}")
+            self.log(f"❌ 流程执行异常: {e}")
             
         self.parent.after(0, lambda: self.btn_start.configure(state=tk.NORMAL))

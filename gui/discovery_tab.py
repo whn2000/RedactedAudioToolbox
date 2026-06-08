@@ -45,11 +45,11 @@ class DiscoveryTabGUI:
     def load_config(self):
         if self.app_context and self.app_context.gateway:
             gateway = self.app_context.gateway
-            # Global config for client
-            self.qb_host_var.set(gateway.get_config("global.qb_host", "http://127.0.0.1"))
-            self.qb_port_var.set(str(gateway.get_config("global.qb_port", "8080")))
-            self.qb_user_var.set(gateway.get_config("global.qb_user", "admin"))
-            self.qb_pass_var.set(gateway.get_config("global.qb_pass", "adminadmin"))
+            # 读取独立的做种客户端配置，回退至全局配置
+            self.qb_host_var.set(gateway.get_config("seeding.host", gateway.get_config("global.qb_host", "http://127.0.0.1")))
+            self.qb_port_var.set(str(gateway.get_config("seeding.port", gateway.get_config("global.qb_port", "8080"))))
+            self.qb_user_var.set(gateway.get_config("seeding.user", gateway.get_config("global.qb_user", "admin")))
+            self.qb_pass_var.set(gateway.get_config("seeding.pass", gateway.get_config("global.qb_pass", "adminadmin")))
             
             # Seeding specific config
             self.client_type_var.set(gateway.get_config("seeding.client_type", "qBittorrent"))
@@ -65,17 +65,17 @@ class DiscoveryTabGUI:
     def save_config(self):
         if self.app_context and self.app_context.gateway:
             gateway = self.app_context.gateway
-            # Global client config
-            gateway.set_config("global.qb_host", self.qb_host_var.get())
-            gateway.set_config("global.qb_port", self.qb_port_var.get())
-            gateway.set_config("global.qb_user", self.qb_user_var.get())
-            gateway.set_config("global.qb_pass", self.qb_pass_var.get())
+            # 保存独立的做种客户端配置，避免修改本地下载配置
+            gateway.set_config("seeding.host", self.qb_host_var.get().strip())
+            gateway.set_config("seeding.port", self.qb_port_var.get().strip())
+            gateway.set_config("seeding.user", self.qb_user_var.get().strip())
+            gateway.set_config("seeding.pass", self.qb_pass_var.get().strip())
             
             # Seeding specific config
             gateway.set_config("seeding.client_type", self.client_type_var.get())
-            gateway.set_config("seeding.rclone_remote", self.rclone_remote_var.get())
-            gateway.set_config("seeding.rclone_config", self.rclone_config_var.get())
-            gateway.set_config("seeding.save_path", self.save_path_var.get())
+            gateway.set_config("seeding.rclone_remote", self.rclone_remote_var.get().strip())
+            gateway.set_config("seeding.rclone_config", self.rclone_config_var.get().strip())
+            gateway.set_config("seeding.save_path", self.save_path_var.get().strip())
             gateway.set_config("seeding.source_site", self.source_site_var.get())
             gateway.set_config("seeding.target_red", self.target_red.get())
             gateway.set_config("seeding.target_ops", self.target_ops.get())

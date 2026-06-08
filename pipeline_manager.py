@@ -4,7 +4,8 @@ from pathlib import Path
 import json
 import requests
 from torf import Torrent
-from qbittorrent_client import QbittorrentClient
+from core.clients.factory import create_client
+from core.seeding.seeding_manager import SeedingManager
 from flac_downsampler import process_album as flac_downsample_album, get_16bit_dir_name, process_mp3_album, get_mp3_dir_name
 from lossless_checker import process_album as check_lossless_album
 from i18n import _
@@ -19,7 +20,8 @@ _DEFAULT_SITE_CONFIG = {
 
 class PipelineManager:
     def __init__(self, qb_host, qb_port, qb_user, qb_pass, red_session, red_options, log_main=print, log_process=print, log_check=print, ask_manual_check=None):
-        self.qb = QbittorrentClient(qb_host, qb_port, qb_user, qb_pass)
+        self.qb = create_client("qBittorrent", qb_host, qb_port, qb_user, qb_pass)
+        self.seeding_manager = SeedingManager()
         self.red_session = red_session
         self.red_options = red_options
         if not self.red_session and self.red_options:
@@ -423,7 +425,16 @@ class PipelineManager:
                                 official_torrent.write_bytes(dl_resp.content)
                                 
                                 self.log_process(_("log_add_official_to_qb"))
-                                self.qb.add_torrent(str(official_torrent), save_path=str(album_dir.parent), category="red_seeding")
+                                rclone_remote = self.seeding_manager._get_cfg("seeding.rclone_remote", "")
+                                use_remote = bool(rclone_remote)
+                                remote_save_path = self.seeding_manager._get_cfg("seeding.manual_remote_save_path", "")
+                                self.seeding_manager.seed_torrent(
+                                    local_path=str(album_dir.parent / up['dir_name']),
+                                    torrent_path=str(official_torrent),
+                                    use_remote=use_remote,
+                                    remote_save_path=remote_save_path,
+                                    on_progress=self.log_process
+                                )
                             else:
                                 self.log_main(_("log_dl_official_fail"))
                         else:
@@ -464,7 +475,16 @@ class PipelineManager:
                                     official_torrent.write_bytes(dl_resp.content)
                                     
                                     self.log_process(_("log_add_official_to_qb"))
-                                    self.qb.add_torrent(str(official_torrent), save_path=str(album_dir.parent), category="red_seeding")
+                                    rclone_remote = self.seeding_manager._get_cfg("seeding.rclone_remote", "")
+                                    use_remote = bool(rclone_remote)
+                                    remote_save_path = self.seeding_manager._get_cfg("seeding.manual_remote_save_path", "")
+                                    self.seeding_manager.seed_torrent(
+                                        local_path=str(album_dir.parent / up['dir_name']),
+                                        torrent_path=str(official_torrent),
+                                        use_remote=use_remote,
+                                        remote_save_path=remote_save_path,
+                                        on_progress=self.log_process
+                                    )
                                 else:
                                     self.log_main(_("log_dl_official_fail"))
                                     
@@ -612,9 +632,19 @@ class PipelineManager:
                     if self.db and res_id:
                         self.db.execute("UPDATE discovery_results SET status = 'failed' WHERE id = ?", (res_id,))
                         
-            # 将种子添加到 qBittorrent 做种
-            self.log_process("    [Pipeline] 正在将种子添加到 qBittorrent 做种...")
-            self.qb.add_torrent(str(torrent_path), save_path=str(album_dir.parent), category="red_seeding")
+            # 将种子送到 SeedingManager 做种 (自动选择本地或远程)
+            self.log_process("    [Pipeline] 正在将种子送到 SeedingManager 做种...")
+            rclone_remote = self.seeding_manager._get_cfg("seeding.rclone_remote", "")
+            use_remote = bool(rclone_remote)
+            remote_save_path = self.seeding_manager._get_cfg("seeding.manual_remote_save_path", "")
+            
+            self.seeding_manager.seed_torrent(
+                local_path=str(album_dir),
+                torrent_path=str(torrent_path),
+                use_remote=use_remote,
+                remote_save_path=remote_save_path,
+                on_progress=self.log_process
+            )
             
         except Exception as e:
             self.log_process(f"全新上传处理异常: {e}")
