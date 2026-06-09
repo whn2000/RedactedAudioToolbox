@@ -83,7 +83,10 @@ class QbittorrentClient(BaseTorrentClient):
                         "name": t.get("name", ""),
                         "hash": t.get("hash", ""),
                         "save_path": t.get("save_path", t.get("savepath", "")),
-                        "tracker": t.get("tracker", "")
+                        "tracker": t.get("tracker", ""),
+                        "progress": t.get("progress", 0),
+                        "state": t.get("state", ""),
+                        "size": t.get("size", 0)
                     })
                 return results
             return []

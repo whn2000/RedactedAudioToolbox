@@ -27,6 +27,9 @@ class BaseTorrentClient(ABC):
         - "hash": 种子的 infohash
         - "save_path": 种子的保存路径
         - "tracker": 种子的 tracker announce URL 字符串（如果是多个用逗号隔开）
+        - "progress": 种子进度 (0.0 - 1.0)
+        - "state": 种子状态字符串
+        - "size": 种子总大小字节数
 
         :param category: 筛选的分类名称（若支持）
         :return: 包含种子信息的字典列表

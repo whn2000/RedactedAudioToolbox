@@ -82,7 +82,10 @@ class TransmissionClient(BaseTorrentClient):
                     "name": t.name,
                     "hash": t.hashString,
                     "save_path": t.download_dir,
-                    "tracker": ",".join([tr.announce for tr in t.trackers]) if t.trackers else ""
+                    "tracker": ",".join([tr.announce for tr in t.trackers]) if t.trackers else "",
+                    "progress": getattr(t, "percent_done", 0.0),
+                    "state": getattr(t, "status", ""),
+                    "size": getattr(t, "total_size", 0)
                 })
             return results
         except Exception as e:
