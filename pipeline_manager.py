@@ -425,8 +425,7 @@ class PipelineManager:
                                 official_torrent.write_bytes(dl_resp.content)
                                 
                                 self.log_process(_("log_add_official_to_qb"))
-                                rclone_remote = self.seeding_manager._get_cfg("seeding.rclone_remote", "")
-                                use_remote = bool(rclone_remote)
+                                use_remote = self.seeding_manager._get_cfg("global.pipeline_use_remote", False)
                                 remote_save_path = self.seeding_manager._get_cfg("seeding.manual_remote_save_path", "")
                                 self.seeding_manager.seed_torrent(
                                     local_path=str(album_dir.parent / up['dir_name']),
@@ -475,8 +474,7 @@ class PipelineManager:
                                     official_torrent.write_bytes(dl_resp.content)
                                     
                                     self.log_process(_("log_add_official_to_qb"))
-                                    rclone_remote = self.seeding_manager._get_cfg("seeding.rclone_remote", "")
-                                    use_remote = bool(rclone_remote)
+                                    use_remote = self.seeding_manager._get_cfg("global.pipeline_use_remote", False)
                                     remote_save_path = self.seeding_manager._get_cfg("seeding.manual_remote_save_path", "")
                                     self.seeding_manager.seed_torrent(
                                         local_path=str(album_dir.parent / up['dir_name']),
@@ -634,8 +632,7 @@ class PipelineManager:
                         
             # 将种子送到 SeedingManager 做种 (自动选择本地或远程)
             self.log_process("    [Pipeline] 正在将种子送到 SeedingManager 做种...")
-            rclone_remote = self.seeding_manager._get_cfg("seeding.rclone_remote", "")
-            use_remote = bool(rclone_remote)
+            use_remote = self.seeding_manager._get_cfg("global.pipeline_use_remote", False)
             remote_save_path = self.seeding_manager._get_cfg("seeding.manual_remote_save_path", "")
             
             self.seeding_manager.seed_torrent(

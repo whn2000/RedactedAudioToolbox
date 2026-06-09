@@ -143,9 +143,15 @@ class SeedingTabGUI:
         ctk.CTkLabel(form_grid, text="远程做种目录:").grid(row=2, column=0, sticky=tk.W, pady=4, padx=5)
         ctk.CTkEntry(form_grid, textvariable=self.remote_save_var, width=320, placeholder_text="e.g. /home/user/downloads/music").grid(row=2, column=1, columnspan=2, sticky=tk.W, pady=4, padx=5)
         
-        # Action button
-        self.btn_start = ctk.CTkButton(form_frame, text="🚀 开始远程同步与做种", font=("", 13, "bold"), fg_color="#28a745", hover_color="#218838", height=36, command=self.start_seeding)
-        self.btn_start.pack(fill=tk.X, padx=12, pady=15)
+        # Action buttons
+        btn_row = ctk.CTkFrame(form_frame, fg_color="transparent")
+        btn_row.pack(fill=tk.X, padx=12, pady=15)
+        
+        self.btn_save_config = ctk.CTkButton(btn_row, text="💾 保存配置", font=("", 13, "bold"), fg_color="#17a2b8", hover_color="#138496", height=36, command=self.save_config_with_msg)
+        self.btn_save_config.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        
+        self.btn_start = ctk.CTkButton(btn_row, text="🚀 开始远程同步与做种", font=("", 13, "bold"), fg_color="#28a745", hover_color="#218838", height=36, command=self.start_seeding)
+        self.btn_start.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
         
         # 2. Bottom Section: Console log
         bottom_frame = ctk.CTkFrame(self.paned_window)
@@ -240,3 +246,10 @@ class SeedingTabGUI:
             self.log(f"❌ 流程执行异常: {e}")
             
         self.parent.after(0, lambda: self.btn_start.configure(state=tk.NORMAL))
+
+    def save_config_with_msg(self):
+        try:
+            self.save_config()
+            messagebox.showinfo("提示", "做种配置已成功保存！")
+        except Exception as e:
+            messagebox.showerror("错误", f"保存配置失败：\n{e}")

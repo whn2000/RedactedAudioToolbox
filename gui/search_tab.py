@@ -78,6 +78,7 @@ class AppGUI:
         self.qb_user_var = tk.StringVar(value="admin")
         self.qb_pass_var = tk.StringVar(value="adminadmin")
         self.enable_pipeline_var = tk.BooleanVar(value=False)
+        self.pipeline_use_remote_var = tk.BooleanVar(value=False)
 
         self.request_interval_var = tk.StringVar(value="3.0")
 
@@ -213,6 +214,7 @@ class AppGUI:
                         if 'qb_user' in global_config: self.qb_user_var.set(global_config['qb_user'])
                         if 'qb_pass' in global_config: self.qb_pass_var.set(global_config['qb_pass'])
                         if 'enable_pipeline' in global_config: self.enable_pipeline_var.set(global_config['enable_pipeline'])
+                        if 'pipeline_use_remote' in global_config: self.pipeline_use_remote_var.set(global_config['pipeline_use_remote'])
                         
                         self.apply_site_settings(self.site_configs_data.get(self.last_site, {}))
                         
@@ -226,6 +228,7 @@ class AppGUI:
                         if 'qb_user' in config: self.qb_user_var.set(config['qb_user'])
                         if 'qb_pass' in config: self.qb_pass_var.set(config['qb_pass'])
                         if 'enable_pipeline' in config: self.enable_pipeline_var.set(config['enable_pipeline'])
+                        if 'pipeline_use_remote' in config: self.pipeline_use_remote_var.set(config['pipeline_use_remote'])
                         
                         migrated_site_config = config.copy()
                         old_api_keys = config.get('api_keys', {})
@@ -265,6 +268,7 @@ class AppGUI:
                         if 'qb_user' in global_config: self.qb_user_var.set(global_config['qb_user'])
                         if 'qb_pass' in global_config: self.qb_pass_var.set(global_config['qb_pass'])
                         if 'enable_pipeline' in global_config: self.enable_pipeline_var.set(global_config['enable_pipeline'])
+                        if 'pipeline_use_remote' in global_config: self.pipeline_use_remote_var.set(global_config['pipeline_use_remote'])
                         
                         self.apply_site_settings(self.site_configs_data.get(self.last_site, {}))
                         
@@ -279,6 +283,7 @@ class AppGUI:
                         if 'qb_user' in config: self.qb_user_var.set(config['qb_user'])
                         if 'qb_pass' in config: self.qb_pass_var.set(config['qb_pass'])
                         if 'enable_pipeline' in config: self.enable_pipeline_var.set(config['enable_pipeline'])
+                        if 'pipeline_use_remote' in config: self.pipeline_use_remote_var.set(config['pipeline_use_remote'])
                         
                         migrated_site_config = config.copy()
                         # 旧版的 API key
@@ -317,6 +322,7 @@ class AppGUI:
                     'qb_user': self.qb_user_var.get(),
                     'qb_pass': self.qb_pass_var.get(),
                     'enable_pipeline': self.enable_pipeline_var.get(),
+                    'pipeline_use_remote': self.pipeline_use_remote_var.get(),
                 },
                 'sites': self.site_configs_data
             }
@@ -427,7 +433,8 @@ class AppGUI:
         pipeline_frame.pack(fill=tk.X, padx=5, pady=5)
         ctk.CTkLabel(pipeline_frame, text=_("auto_pipeline"), font=("", 16, "bold")).grid(row=0, column=0, columnspan=4, sticky=tk.W, pady=5, padx=5)
         
-        ctk.CTkCheckBox(pipeline_frame, text=_("enable_pipeline"), variable=self.enable_pipeline_var).grid(row=1, column=0, columnspan=4, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkCheckBox(pipeline_frame, text=_("enable_pipeline"), variable=self.enable_pipeline_var).grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkCheckBox(pipeline_frame, text=_("pipeline_use_remote"), variable=self.pipeline_use_remote_var).grid(row=1, column=2, columnspan=2, sticky=tk.W, pady=5, padx=5)
         
         ctk.CTkLabel(pipeline_frame, text=_("qb_host")).grid(row=2, column=0, sticky=tk.W, pady=5, padx=5)
         ctk.CTkEntry(pipeline_frame, textvariable=self.qb_host_var, width=200).grid(row=2, column=1, sticky=tk.W, padx=5)
@@ -548,7 +555,8 @@ class AppGUI:
             qb_port=self.qb_port_var.get(),
             qb_user=self.qb_user_var.get(),
             qb_pass=self.qb_pass_var.get(),
-            enable_pipeline=self.enable_pipeline_var.get()
+            enable_pipeline=self.enable_pipeline_var.get(),
+            pipeline_use_remote=self.pipeline_use_remote_var.get()
         )
 
     def start_search(self):
