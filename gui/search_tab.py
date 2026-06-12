@@ -79,6 +79,7 @@ class AppGUI:
         self.qb_pass_var = tk.StringVar(value="adminadmin")
         self.enable_pipeline_var = tk.BooleanVar(value=False)
         self.pipeline_use_remote_var = tk.BooleanVar(value=False)
+        self.ignore_warnings_var = tk.BooleanVar(value=False)
 
         self.request_interval_var = tk.StringVar(value="3.0")
 
@@ -140,6 +141,7 @@ class AppGUI:
             'use_fl_token': self.use_fl_token_var.get(),
             'fl_token_threshold': self.fl_token_threshold_var.get(),
             'request_interval': self.request_interval_var.get(),
+            'ignore_warnings': self.ignore_warnings_var.get(),
         }
 
     def apply_site_settings(self, config):
@@ -160,6 +162,7 @@ class AppGUI:
         if 'ignore_lossy' in config: self.ignore_lossy_var.set(config['ignore_lossy'])
         if 'ignore_16bit' in config: self.ignore_16bit_var.set(config['ignore_16bit'])
         if 'ignore_mp3_exists' in config: self.ignore_mp3_exists_var.set(config['ignore_mp3_exists'])
+        if 'ignore_warnings' in config: self.ignore_warnings_var.set(config['ignore_warnings'])
         if 'ignore_trumpable' in config: self.ignore_trumpable_var.set(config['ignore_trumpable'])
         if 'album' in config: self.album_var.set(config['album'])
         if 'soundtrack' in config: self.soundtrack_var.set(config['soundtrack'])
@@ -436,17 +439,19 @@ class AppGUI:
         ctk.CTkCheckBox(pipeline_frame, text=_("enable_pipeline"), variable=self.enable_pipeline_var).grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=5, padx=5)
         ctk.CTkCheckBox(pipeline_frame, text=_("pipeline_use_remote"), variable=self.pipeline_use_remote_var).grid(row=1, column=2, columnspan=2, sticky=tk.W, pady=5, padx=5)
         
-        ctk.CTkLabel(pipeline_frame, text=_("qb_host")).grid(row=2, column=0, sticky=tk.W, pady=5, padx=5)
-        ctk.CTkEntry(pipeline_frame, textvariable=self.qb_host_var, width=200).grid(row=2, column=1, sticky=tk.W, padx=5)
+        ctk.CTkCheckBox(pipeline_frame, text="无视警告直接上传 (无视无损检测结果)", variable=self.ignore_warnings_var).grid(row=2, column=0, columnspan=4, sticky=tk.W, pady=5, padx=5)
         
-        ctk.CTkLabel(pipeline_frame, text=_("qb_port")).grid(row=2, column=2, sticky=tk.W, pady=5, padx=5)
-        ctk.CTkEntry(pipeline_frame, textvariable=self.qb_port_var, width=100).grid(row=2, column=3, sticky=tk.W, padx=5)
+        ctk.CTkLabel(pipeline_frame, text=_("qb_host")).grid(row=3, column=0, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkEntry(pipeline_frame, textvariable=self.qb_host_var, width=200).grid(row=3, column=1, sticky=tk.W, padx=5)
         
-        ctk.CTkLabel(pipeline_frame, text=_("qb_user")).grid(row=3, column=0, sticky=tk.W, pady=5, padx=5)
-        ctk.CTkEntry(pipeline_frame, textvariable=self.qb_user_var, width=200).grid(row=3, column=1, sticky=tk.W, padx=5)
+        ctk.CTkLabel(pipeline_frame, text=_("qb_port")).grid(row=3, column=2, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkEntry(pipeline_frame, textvariable=self.qb_port_var, width=100).grid(row=3, column=3, sticky=tk.W, padx=5)
         
-        ctk.CTkLabel(pipeline_frame, text=_("qb_pass")).grid(row=3, column=2, sticky=tk.W, pady=5, padx=5)
-        ctk.CTkEntry(pipeline_frame, textvariable=self.qb_pass_var, width=200, show="*").grid(row=3, column=3, sticky=tk.W, padx=5)
+        ctk.CTkLabel(pipeline_frame, text=_("qb_user")).grid(row=4, column=0, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkEntry(pipeline_frame, textvariable=self.qb_user_var, width=200).grid(row=4, column=1, sticky=tk.W, padx=5)
+        
+        ctk.CTkLabel(pipeline_frame, text=_("qb_pass")).grid(row=4, column=2, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkEntry(pipeline_frame, textvariable=self.qb_pass_var, width=200, show="*").grid(row=4, column=3, sticky=tk.W, padx=5)
 
         btn_frame = ctk.CTkFrame(self.scrollable_frame, fg_color="transparent")
         btn_frame.pack(fill=tk.X, padx=5, pady=10)
@@ -556,7 +561,8 @@ class AppGUI:
             qb_user=self.qb_user_var.get(),
             qb_pass=self.qb_pass_var.get(),
             enable_pipeline=self.enable_pipeline_var.get(),
-            pipeline_use_remote=self.pipeline_use_remote_var.get()
+            pipeline_use_remote=self.pipeline_use_remote_var.get(),
+            ignore_warnings=self.ignore_warnings_var.get()
         )
 
     def start_search(self):

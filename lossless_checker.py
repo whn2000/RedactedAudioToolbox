@@ -5,8 +5,11 @@ from pathlib import Path
 from PIL import Image
 import concurrent.futures
 import threading
-import tkinter as tk
-from tkinter import ttk, filedialog, scrolledtext
+try:
+    import tkinter as tk
+    from tkinter import ttk, filedialog, scrolledtext
+except (ImportError, ModuleNotFoundError):
+    tk = None
 
 # AAFS Imports
 import sys
@@ -312,9 +315,12 @@ def process_album(album_dir, output_dir=None, fast_mode=False):
     return all_lossless
 
 
-import customtkinter as ctk
-
-from gui.widgets import RedirectText
+try:
+    import customtkinter as ctk
+    from gui.widgets import RedirectText
+except (ImportError, ModuleNotFoundError):
+    ctk = None
+    RedirectText = None
 
 class LosslessCheckerGUI:
     def __init__(self, parent):

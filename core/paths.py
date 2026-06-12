@@ -55,6 +55,42 @@ class Paths:
         for d in directories:
             d.mkdir(parents=True, exist_ok=True)
             
+    def translate_path(self, path_str: str) -> str:
+        if not path_str:
+            return path_str
+        import core.globals
+        if core.globals.app_context and core.globals.app_context.gateway:
+            gateway = core.globals.app_context.gateway
+            global_cfg = gateway.get_config("global", {})
+            src = global_cfg.get("path_map_src", "")
+            dest = global_cfg.get("path_map_dest", "")
+            if src and dest:
+                clean_path = path_str.replace('\\', '/')
+                clean_src = src.replace('\\', '/')
+                clean_dest = dest.replace('\\', '/')
+                if clean_path.lower().startswith(clean_src.lower()):
+                    replaced = clean_dest + clean_path[len(clean_src):]
+                    return replaced
+        return path_str
+
+    def reverse_translate_path(self, path_str: str) -> str:
+        if not path_str:
+            return path_str
+        import core.globals
+        if core.globals.app_context and core.globals.app_context.gateway:
+            gateway = core.globals.app_context.gateway
+            global_cfg = gateway.get_config("global", {})
+            src = global_cfg.get("path_map_src", "")
+            dest = global_cfg.get("path_map_dest", "")
+            if src and dest:
+                clean_path = path_str.replace('\\', '/')
+                clean_src = src.replace('\\', '/')
+                clean_dest = dest.replace('\\', '/')
+                if clean_path.lower().startswith(clean_dest.lower()):
+                    replaced = clean_src + clean_path[len(clean_dest):]
+                    return replaced.replace('/', '\\')
+        return path_str
+
     def clear_temp(self):
         """清理临时文件夹中的内容（建议在程序启动或关闭时调用）"""
         if self.temp_dir.exists():

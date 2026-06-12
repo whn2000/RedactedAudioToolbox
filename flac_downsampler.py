@@ -19,8 +19,11 @@ try:
 except ImportError:
     pass
 
-import tkinter as tk
-from tkinter import ttk, filedialog, scrolledtext
+try:
+    import tkinter as tk
+    from tkinter import ttk, filedialog, scrolledtext
+except (ImportError, ModuleNotFoundError):
+    tk = None
 import threading
 import sys
 
@@ -331,10 +334,13 @@ def process_batch_with_options(base_dir, tracker_url, source_flag, flac_out=True
 
 
 
-import customtkinter as ctk
+try:
+    import customtkinter as ctk
+    from gui.widgets import RedirectText
+except (ImportError, ModuleNotFoundError):
+    ctk = None
+    RedirectText = None
 from i18n import _
-
-from gui.widgets import RedirectText
 
 class FlacDownsamplerGUI:
     def __init__(self, parent):

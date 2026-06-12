@@ -10,6 +10,7 @@ from flac_downsampler import process_album as flac_downsample_album, get_16bit_d
 from lossless_checker import process_album as check_lossless_album
 from i18n import _
 import traceback
+from core.paths import app_paths
 
 _DEFAULT_SITE_CONFIG = {
     "api_url": "https://redacted.sh/ajax.php",
@@ -201,7 +202,8 @@ class PipelineManager:
             site_config = getattr(self.red_options, 'site_config', _DEFAULT_SITE_CONFIG)
             base_url = site_config["base_url"]
             api_url = site_config["api_url"]
-            album_dir = Path(save_path) / name
+            translated_save_path = app_paths.translate_path(str(save_path))
+            album_dir = Path(translated_save_path) / name
             if not album_dir.exists() or not album_dir.is_dir():
                 self.log_process(_("log_album_dir_not_found").format(album_dir=album_dir))
                 return
@@ -231,7 +233,10 @@ class PipelineManager:
                 is_lossless = check_lossless_album(output_dir, fast_mode=True)
                 if not is_lossless:
                     self.log_check(_("log_lossless_fail").format(name=output_dir.name))
-                    if self.ask_manual_check:
+                    ignore_warnings = getattr(self.red_options, 'ignore_warnings', False)
+                    if ignore_warnings:
+                        self.log_check(_("log_bypass_lossless_check").format(name=output_dir.name))
+                    elif self.ask_manual_check:
                         self.log_check(_("log_wait_manual_confirm").format(name=output_dir.name))
                         user_confirmed = self.ask_manual_check(output_dir.name)
                         if not user_confirmed:

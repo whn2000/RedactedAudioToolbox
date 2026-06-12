@@ -119,8 +119,8 @@ class SeedingManager:
             _log("🔄 [SeedingManager] 正在连接本地做种客户端...")
             try:
                 client = self.get_client(is_remote=False)
-                # 本地保存路径默认为数据所在目录的父目录
-                save_dir = str(Path(local_path).parent)
+                from core.paths import app_paths
+                save_dir = app_paths.reverse_translate_path(str(Path(local_path).parent))
                 _log(f"📥 [SeedingManager] 正在向本地客户端推送种子，路径: {save_dir}")
                 success = client.add_torrent(torrent_path, save_path=save_dir, category="red_seeding")
                 if success:

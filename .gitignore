@@ -26,3 +26,5 @@ EliteTMHelper2.spec
 *.spec
 _build/
 release/
+data/
+music/

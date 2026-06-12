@@ -50,6 +50,15 @@ def _setup_root_logger():
     error_handler.setLevel(logging.WARNING)
     error_handler.setFormatter(formatter)
     
+    # 抑制第三方库的 Debug 日志，避免网络轮询刷屏
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("requests").setLevel(logging.WARNING)
+    logging.getLogger("asyncio").setLevel(logging.WARNING)
+
+    # 抑制本地极其频繁的底层 Debug 日志（网关读写、事件流），避免控制台刷屏
+    logging.getLogger("StorageGateway").setLevel(logging.INFO)
+    logging.getLogger("core.events").setLevel(logging.INFO)
+
     root_logger.addHandler(console_handler)
     root_logger.addHandler(app_handler)
     root_logger.addHandler(error_handler)
